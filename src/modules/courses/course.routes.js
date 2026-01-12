@@ -104,7 +104,8 @@ router.get(
   "/assignments/count",
   authMiddleware,
   roleMiddleware("admin", "manager"),
-  (req, res) => require("./course.controller").getTotalAssignmentsCount(req, res)
+  (req, res) =>
+    require("./course.controller").getTotalAssignmentsCount(req, res)
 );
 
 /**

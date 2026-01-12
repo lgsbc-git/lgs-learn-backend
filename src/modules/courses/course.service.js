@@ -231,7 +231,9 @@ const fetchCourseCatalog = async () => {
  */
 const fetchTotalAssignmentsCount = async () => {
   const pool = await getDbPool();
-  const result = await pool.query(`SELECT COUNT(1) AS total FROM CourseAssignments`);
+  const result = await pool.query(
+    `SELECT COUNT(1) AS total FROM CourseAssignments`
+  );
   return result.recordset[0]?.total || 0;
 };
 
