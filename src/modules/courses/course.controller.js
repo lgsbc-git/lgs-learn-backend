@@ -8,6 +8,10 @@ const {
   fetchAssignedUserIdsForCourse,
   fetchTotalAssignmentsCount,
   fetchCourseCatalog,
+  fetchEnrolledUsersForCourse,
+  unassignUserFromCourse,
+  fetchCompletedUsersForCourse,
+  deleteCourseFully,
 } = require("./course.service");
 
 /**
@@ -181,6 +185,85 @@ const getCourseCatalog = async (req, res) => {
   }
 };
 
+/**
+ * GET /courses/:courseId/enrolled-users
+ * Admin / Manager / Instructor - return list of enrolled users with details
+ */
+const getEnrolledUsers = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const users = await fetchEnrolledUsersForCourse(courseId);
+    res.status(200).json({ users });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * GET /courses/:courseId/completed-users
+ * Admin / Manager / Instructor - return list of completed users with details (read-only)
+ */
+const getCompletedUsers = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const users = await fetchCompletedUsersForCourse(courseId);
+    res.status(200).json({ users });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * DELETE /courses/:courseId/users/:userId
+ * Admin / Manager - unassign user from course
+ */
+const unassignUser = async (req, res) => {
+  try {
+    const { courseId, userId } = req.params;
+
+    if (!courseId || !userId) {
+      return res.status(400).json({
+        message: "courseId and userId are required",
+      });
+    }
+
+    await unassignUserFromCourse(courseId, userId);
+
+    res.status(200).json({
+      message: "User unassigned successfully",
+    });
+  } catch (err) {
+    if (err.message === "Assignment not found") {
+      return res.status(404).json({ message: err.message });
+    }
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * DELETE /courses/:courseId
+ * Admin / Manager - delete entire course
+ */
+const deleteCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+
+    if (!courseId) {
+      return res.status(400).json({
+        message: "courseId is required",
+      });
+    }
+
+    await deleteCourseFully(courseId);
+
+    res.status(200).json({
+      message: "Course deleted successfully",
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 module.exports = {
   createCourse,
   getMyAssignedCourses,
@@ -191,4 +274,8 @@ module.exports = {
   saveCourseContent,
   getAssignedUsersForCourse,
   getTotalAssignmentsCount,
+  getEnrolledUsers,
+  unassignUser,
+  getCompletedUsers,
+  deleteCourse,
 };

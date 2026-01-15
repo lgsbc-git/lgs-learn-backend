@@ -205,6 +205,145 @@ const fetchAssignedUserIdsForCourse = async (courseId) => {
 };
 
 /**
+ * Get enrolled users for a course with their details
+ */
+const fetchEnrolledUsersForCourse = async (courseId) => {
+  const pool = await getDbPool();
+
+  const result = await pool.request().input("courseId", courseId).query(`
+    SELECT 
+      u.id,
+      u.name,
+      u.email,
+      u.role,
+      ca.assignmentType,
+      ca.assignedAt,
+      ca.id AS assignmentId
+    FROM CourseAssignments ca
+    JOIN Users u ON ca.userId = u.id
+    WHERE ca.courseId = @courseId
+    ORDER BY ca.assignedAt DESC
+  `);
+
+  return result.recordset;
+};
+
+/**
+ * Unassign a user from a course
+ */
+const unassignUserFromCourse = async (courseId, userId) => {
+  const pool = await getDbPool();
+
+  const result = await pool
+    .request()
+    .input("courseId", courseId)
+    .input("userId", userId)
+    .query(`
+      DELETE FROM CourseAssignments 
+      WHERE courseId = @courseId AND userId = @userId
+    `);
+
+  if (result.rowsAffected[0] === 0) {
+    throw new Error("Assignment not found");
+  }
+
+  return true;
+};
+
+/**
+ * Get completed users for a course
+ */
+const fetchCompletedUsersForCourse = async (courseId) => {
+  const pool = await getDbPool();
+
+  const result = await pool.request().input("courseId", courseId).query(`
+    SELECT DISTINCT
+      u.id,
+      u.name,
+      u.email,
+      u.role,
+      ca.assignedAt,
+      COUNT(DISTINCT ch.id) AS totalLessons,
+      COUNT(DISTINCT CASE WHEN lp.completed = 1 THEN ch.id END) AS completedLessons
+    FROM CourseAssignments ca
+    JOIN Users u ON ca.userId = u.id
+    JOIN CourseModules m ON m.courseId = ca.courseId
+    JOIN CourseChapters ch ON ch.moduleId = m.id
+    LEFT JOIN LessonProgress lp 
+      ON lp.chapterId = ch.id AND lp.userId = ca.userId AND lp.completed = 1
+    WHERE ca.courseId = @courseId
+    GROUP BY u.id, u.name, u.email, u.role, ca.assignedAt
+    HAVING COUNT(DISTINCT ch.id) > 0 AND COUNT(DISTINCT ch.id) = COUNT(DISTINCT CASE WHEN lp.completed = 1 THEN ch.id END)
+    ORDER BY ca.assignedAt DESC
+  `);
+
+  return result.recordset;
+};
+
+/**
+ * Delete a course and all its related data
+ */
+const deleteCourseFully = async (courseId) => {
+  const pool = await getDbPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+  try {
+    // Delete lesson progress for all users in this course
+    let req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE lp
+      FROM LessonProgress lp
+      JOIN CourseChapters ch ON lp.chapterId = ch.id
+      JOIN CourseModules m ON ch.moduleId = m.id
+      WHERE m.courseId = @courseId
+    `);
+
+    // Delete chapter contents
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE cc
+      FROM ChapterContents cc
+      JOIN CourseChapters ch ON cc.chapterId = ch.id
+      JOIN CourseModules m ON ch.moduleId = m.id
+      WHERE m.courseId = @courseId
+    `);
+
+    // Delete chapters
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE ch
+      FROM CourseChapters ch
+      JOIN CourseModules m ON ch.moduleId = m.id
+      WHERE m.courseId = @courseId
+    `);
+
+    // Delete modules
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE FROM CourseModules WHERE courseId = @courseId
+    `);
+
+    // Delete course assignments
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE FROM CourseAssignments WHERE courseId = @courseId
+    `);
+
+    // Delete the course
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE FROM Courses WHERE id = @courseId
+    `);
+
+    await transaction.commit();
+    return true;
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+};
+
+/**
  * Fetch all courses (catalog view)
  */
 const fetchCourseCatalog = async () => {
@@ -245,6 +384,10 @@ module.exports = {
   fetchCourseCatalog,
   fetchAssignedUserIdsForCourse,
   fetchTotalAssignmentsCount,
+  fetchEnrolledUsersForCourse,
+  unassignUserFromCourse,
+  fetchCompletedUsersForCourse,
+  deleteCourseFully,
   // Admin: fetch structured content without assignment check
   fetchCourseContentForAdmin: async (courseId) => {
     const pool = await getDbPool();

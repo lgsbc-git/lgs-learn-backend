@@ -12,6 +12,10 @@ const {
   saveCourseContent,
   assignCourseToUsers,
   getCourseCatalog,
+  getEnrolledUsers,
+  unassignUser,
+  getCompletedUsers,
+  deleteCourse,
 } = require("./course.controller");
 
 console.log({
@@ -120,6 +124,47 @@ router.get(
     return require("./course.controller").getAssignedUsersForCourse(req, res);
   }
 );
+
+/**
+ * Get enrolled users for a course with details
+ */
+router.get(
+  "/:courseId/enrolled-users",
+  authMiddleware,
+  roleMiddleware("admin", "manager"),
+  getEnrolledUsers
+);
+
+/**
+ * Get completed users for a course with details (read-only)
+ */
+router.get(
+  "/:courseId/completed-users",
+  authMiddleware,
+  roleMiddleware("admin", "manager"),
+  getCompletedUsers
+);
+
+/**
+ * Unassign user from course
+ */
+router.delete(
+  "/:courseId/users/:userId",
+  authMiddleware,
+  roleMiddleware("admin", "manager"),
+  unassignUser
+);
+
+/**
+ * Delete course
+ */
+router.delete(
+  "/:courseId",
+  authMiddleware,
+  roleMiddleware("admin", "manager"),
+  deleteCourse
+);
+
 /**
  * Course catalog (Admin / Manager)
  */
