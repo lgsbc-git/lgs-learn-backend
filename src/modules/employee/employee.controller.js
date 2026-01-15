@@ -8,26 +8,40 @@ exports.summary = async (req, res) => {
     const userId = req.user.id;
     const pool = await getDbPool();
 
+    // Get all enrolled courses with their completion progress
     const result = await pool.request().input("userId", userId).query(`
       SELECT
-        COUNT(DISTINCT ca.courseId) AS coursesEnrolled,
-        COUNT(DISTINCT lp.chapterId) AS lessonsCompleted,
-        COUNT(DISTINCT ch.id) AS totalLessons
+        c.id,
+        COUNT(DISTINCT ch.id) AS totalLessons,
+        COUNT(DISTINCT CASE WHEN lp.completed = 1 AND lp.userId = @userId THEN ch.id END) AS completedLessons
       FROM CourseAssignments ca
       JOIN Courses c ON c.id = ca.courseId
       LEFT JOIN CourseModules m ON m.courseId = c.id
       LEFT JOIN CourseChapters ch ON ch.moduleId = m.id
-      LEFT JOIN LessonProgress lp 
-        ON lp.chapterId = ch.id 
-        AND lp.userId = ca.userId
-        AND lp.completed = 1
+      LEFT JOIN LessonProgress lp ON lp.chapterId = ch.id AND lp.userId = @userId
       WHERE ca.userId = @userId
+      GROUP BY c.id
     `);
 
-    const row = result.recordset[0];
+    const courses = result.recordset;
+    const coursesEnrolled = courses.length;
 
-    // compute remaining mandatory courses: mandatory assigned courses where progress < 100%
-    const remainingRes = await pool.request().input("userId", userId).query(`
+    // Count completed courses (100% progress) and learning hours
+    let coursesCompleted = 0;
+    let totalLessonsCompleted = 0;
+
+    courses.forEach((course) => {
+      if (
+        course.totalLessons > 0 &&
+        course.completedLessons === course.totalLessons
+      ) {
+        coursesCompleted++;
+      }
+      totalLessonsCompleted += course.completedLessons || 0;
+    });
+
+    // Get remaining mandatory courses (mandatory courses where progress < 100%)
+    const mandatoryRes = await pool.request().input("userId", userId).query(`
       SELECT COUNT(*) AS remainingMandatory
       FROM (
         SELECT c.id,
@@ -45,16 +59,13 @@ exports.summary = async (req, res) => {
     `);
 
     const remainingMandatory =
-      remainingRes.recordset[0]?.remainingMandatory || 0;
+      mandatoryRes.recordset[0]?.remainingMandatory || 0;
 
     res.json({
-      learningHours: Math.floor((row.lessonsCompleted || 0) * 0.5),
+      learningHours: Math.floor((totalLessonsCompleted || 0) * 0.5),
       remainingMandatoryCourses: remainingMandatory,
-      coursesEnrolled: row.coursesEnrolled || 0,
-      coursesCompleted:
-        row.totalLessons > 0 && row.lessonsCompleted === row.totalLessons
-          ? row.coursesEnrolled
-          : 0,
+      coursesEnrolled: coursesEnrolled || 0,
+      coursesCompleted: coursesCompleted || 0,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -254,42 +265,50 @@ exports.myCourses = async (req, res) => {
 exports.enrollCourse = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { courseId } = req.params;
+    const courseId = parseInt(req.params.courseId, 10);
     const { assignmentType = "optional", dueDate = null } = req.body || {};
     const pool = await getDbPool();
+
+    if (!courseId || isNaN(courseId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid course ID" });
+    }
 
     // Check if already enrolled
     const checkResult = await pool
       .request()
       .input("userId", userId)
       .input("courseId", courseId).query(`
-      SELECT id FROM CourseAssignments
-      WHERE userId = @userId AND courseId = @courseId
-    `);
+        SELECT id FROM CourseAssignments
+        WHERE userId = @userId AND courseId = @courseId
+      `);
 
     if (checkResult.recordset.length > 0) {
       return res
         .status(400)
-        .json({ message: "Already enrolled in this course" });
+        .json({ success: false, message: "Already enrolled in this course" });
     }
 
-    // Enroll the user (allow dueDate to be null when self-enrolling)
-    await pool
+    // Enroll the user (self-enrollment: assignedBy = userId)
+    const insertResult = await pool
       .request()
       .input("userId", userId)
       .input("courseId", courseId)
       .input("assignmentType", assignmentType)
-      .input("dueDate", dueDate).query(`
-      INSERT INTO CourseAssignments (userId, courseId, assignmentType, assignedAt, dueDate)
-      VALUES (@userId, @courseId, @assignmentType, GETDATE(), @dueDate)
-    `);
+      .input("dueDate", dueDate || null)
+      .input("assignedBy", userId).query(`
+        INSERT INTO CourseAssignments (userId, courseId, assignmentType, assignedAt, dueDate, assignedBy)
+        VALUES (@userId, @courseId, @assignmentType, GETDATE(), @dueDate, @assignedBy)
+      `);
 
     res.json({
       success: true,
       message: "Successfully enrolled in course",
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Enroll course error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
