@@ -116,7 +116,7 @@ const fetchCourseContentForEmployee = async (courseId, userId) => {
     throw new Error("Course not assigned to this user");
   }
 
-  // Fetch structured content
+  // Fetch structured content with media
   const result = await pool.request().input("courseId", courseId).query(`
       SELECT
         m.id AS moduleId,
@@ -125,12 +125,20 @@ const fetchCourseContentForEmployee = async (courseId, userId) => {
         ch.id AS chapterId,
         ch.title AS chapterTitle,
         ch.chapterOrder,
-        cc.content
+        cc.content,
+        cm.id AS mediaId,
+        cm.mediaUrl,
+        cm.fileName,
+        cm.mediaType,
+        cm.mimeType,
+        cm.fileSize,
+        cm.blobName
       FROM CourseModules m
       JOIN CourseChapters ch ON ch.moduleId = m.id
       JOIN ChapterContents cc ON cc.chapterId = ch.id
+      LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
       WHERE m.courseId = @courseId
-      ORDER BY m.moduleOrder, ch.chapterOrder
+      ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
     `);
 
   const modulesMap = {};
@@ -144,11 +152,36 @@ const fetchCourseContentForEmployee = async (courseId, userId) => {
       };
     }
 
-    modulesMap[row.moduleId].chapters.push({
-      id: row.chapterId,
-      title: row.chapterTitle,
-      content: row.content,
-    });
+    const existingChapter = modulesMap[row.moduleId].chapters.find(
+      (ch) => ch.id === row.chapterId
+    );
+
+    if (!existingChapter) {
+      modulesMap[row.moduleId].chapters.push({
+        id: row.chapterId,
+        title: row.chapterTitle,
+        content: row.content,
+        media: [],
+      });
+    }
+
+    // Add media if it exists
+    if (row.mediaId) {
+      const chapter = modulesMap[row.moduleId].chapters.find(
+        (ch) => ch.id === row.chapterId
+      );
+      if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
+        chapter.media.push({
+          id: row.mediaId,
+          url: row.mediaUrl,
+          fileName: row.fileName,
+          mediaType: row.mediaType,
+          mimeType: row.mimeType,
+          size: row.fileSize,
+          blobName: row.blobName,
+        });
+      }
+    }
   }
 
   return Object.values(modulesMap);
@@ -237,8 +270,7 @@ const unassignUserFromCourse = async (courseId, userId) => {
   const result = await pool
     .request()
     .input("courseId", courseId)
-    .input("userId", userId)
-    .query(`
+    .input("userId", userId).query(`
       DELETE FROM CourseAssignments 
       WHERE courseId = @courseId AND userId = @userId
     `);
@@ -400,12 +432,20 @@ module.exports = {
           ch.id AS chapterId,
           ch.title AS chapterTitle,
           ch.chapterOrder,
-          cc.content
+          cc.content,
+          cm.id AS mediaId,
+          cm.mediaUrl,
+          cm.fileName,
+          cm.mediaType,
+          cm.mimeType,
+          cm.fileSize,
+          cm.blobName
         FROM CourseModules m
         JOIN CourseChapters ch ON ch.moduleId = m.id
         JOIN ChapterContents cc ON cc.chapterId = ch.id
+        LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
         WHERE m.courseId = @courseId
-        ORDER BY m.moduleOrder, ch.chapterOrder
+        ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
       `);
 
     const modulesMap = {};
@@ -419,11 +459,36 @@ module.exports = {
         };
       }
 
-      modulesMap[row.moduleId].chapters.push({
-        id: row.chapterId,
-        title: row.chapterTitle,
-        content: row.content,
-      });
+      const existingChapter = modulesMap[row.moduleId].chapters.find(
+        (ch) => ch.id === row.chapterId
+      );
+
+      if (!existingChapter) {
+        modulesMap[row.moduleId].chapters.push({
+          id: row.chapterId,
+          title: row.chapterTitle,
+          content: row.content,
+          media: [],
+        });
+      }
+
+      // Add media if it exists
+      if (row.mediaId) {
+        const chapter = modulesMap[row.moduleId].chapters.find(
+          (ch) => ch.id === row.chapterId
+        );
+        if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
+          chapter.media.push({
+            id: row.mediaId,
+            url: row.mediaUrl,
+            fileName: row.fileName,
+            mediaType: row.mediaType,
+            mimeType: row.mimeType,
+            size: row.fileSize,
+            blobName: row.blobName,
+          });
+        }
+      }
     }
 
     return Object.values(modulesMap);
@@ -434,8 +499,21 @@ module.exports = {
     const transaction = new sql.Transaction(pool);
     await transaction.begin();
     try {
-      // Delete existing contents for the course (contents -> chapters -> modules)
+      // Delete existing contents for the course (must respect foreign keys)
+      // Order: LessonProgress -> ChapterContents -> CourseChapters -> CourseModules
+
+      // 1. Delete LessonProgress records first (they reference chapters)
       let req = new sql.Request(transaction);
+      await req.input("courseId", courseId).query(`
+        DELETE lp
+        FROM LessonProgress lp
+        JOIN CourseChapters ch ON lp.chapterId = ch.id
+        JOIN CourseModules m ON ch.moduleId = m.id
+        WHERE m.courseId = @courseId
+      `);
+
+      // 2. Delete ChapterContents
+      req = new sql.Request(transaction);
       await req.input("courseId", courseId).query(`
         DELETE cc
         FROM ChapterContents cc
@@ -444,6 +522,7 @@ module.exports = {
         WHERE m.courseId = @courseId
       `);
 
+      // 3. Delete CourseChapters
       req = new sql.Request(transaction);
       await req.input("courseId", courseId).query(`
         DELETE ch
@@ -452,6 +531,7 @@ module.exports = {
         WHERE m.courseId = @courseId
       `);
 
+      // 4. Delete CourseModules
       req = new sql.Request(transaction);
       await req.input("courseId", courseId).query(`
         DELETE FROM CourseModules WHERE courseId = @courseId
@@ -498,6 +578,25 @@ module.exports = {
               INSERT INTO ChapterContents (chapterId, content)
               VALUES (@chapterId, @content)
           `);
+
+          // Insert media for this chapter
+          if (Array.isArray(ch.media) && ch.media.length > 0) {
+            for (const media of ch.media) {
+              req = new sql.Request(transaction);
+              await req
+                .input("chapterId", chapterId)
+                .input("mediaUrl", media.url || "")
+                .input("fileName", media.fileName || "")
+                .input("mediaType", media.mediaType || "image")
+                .input("mimeType", media.mimeType || "")
+                .input("fileSize", media.size || 0)
+                .input("blobName", media.blobName || "").query(`
+                  INSERT INTO ChapterMedia 
+                  (chapterId, mediaUrl, fileName, mediaType, mimeType, fileSize, blobName)
+                  VALUES (@chapterId, @mediaUrl, @fileName, @mediaType, @mimeType, @fileSize, @blobName)
+              `);
+            }
+          }
         }
       }
 

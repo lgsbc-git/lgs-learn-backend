@@ -15,6 +15,13 @@ const env = {
   jwt: {
     secret: process.env.JWT_SECRET,
   },
+
+  azure: {
+    storageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME,
+    storageAccountKey: process.env.AZURE_STORAGE_ACCOUNT_KEY,
+    connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
+    containerName: process.env.AZURE_STORAGE_CONTAINER_NAME,
+  },
 };
 
 // Basic validation (fail fast)
@@ -26,6 +33,12 @@ if (!env.db.user || !env.db.password || !env.db.server || !env.db.database) {
 if (!env.jwt.secret) {
   console.error("❌ JWT_SECRET is missing");
   process.exit(1);
+}
+
+if (!env.azure.connectionString || !env.azure.containerName) {
+  console.warn(
+    "⚠️  Azure Blob Storage variables are missing (optional feature)"
+  );
 }
 
 module.exports = env;

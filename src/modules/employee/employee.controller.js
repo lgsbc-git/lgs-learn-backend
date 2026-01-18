@@ -320,6 +320,8 @@ exports.courseDetails = async (req, res) => {
     const courseId = req.params.courseId || req.params.id;
     const userId = req.user.id;
 
+    console.log("📍 courseDetails called:", { courseId, userId });
+
     const pool = await getDbPool();
 
     const result = await pool
@@ -337,17 +339,39 @@ exports.courseDetails = async (req, res) => {
 
           cc.content AS lessonContent,
 
+          cm.id AS mediaId,
+          cm.mediaUrl,
+          cm.fileName,
+          cm.mediaType,
+          cm.mimeType,
+          cm.fileSize,
+
           ISNULL(lp.completed, 0) AS completed
         FROM CourseModules m
         JOIN CourseChapters ch ON ch.moduleId = m.id
         LEFT JOIN ChapterContents cc ON cc.chapterId = ch.id
+        LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
         LEFT JOIN LessonProgress lp
           ON lp.chapterId = ch.id AND lp.userId = @userId
         WHERE m.courseId = @courseId
-        ORDER BY m.moduleOrder, ch.chapterOrder
+        ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
       `);
 
     const modulesMap = {};
+
+    console.log("🔍 Total rows from DB:", result.recordset.length);
+    if (result.recordset.length > 0) {
+      console.log("📊 First 5 rows:");
+      result.recordset.slice(0, 5).forEach((row, idx) => {
+        console.log(`Row ${idx}:`, {
+          moduleId: row.moduleId,
+          lessonId: row.lessonId,
+          mediaId: row.mediaId,
+          mediaUrl: row.mediaUrl ? row.mediaUrl.substring(0, 50) + "..." : null,
+          fileName: row.fileName,
+        });
+      });
+    }
 
     for (const row of result.recordset) {
       if (!modulesMap[row.moduleId]) {
@@ -358,19 +382,60 @@ exports.courseDetails = async (req, res) => {
         };
       }
 
-      modulesMap[row.moduleId].lessons.push({
-        id: row.lessonId,
-        title: row.lessonTitle,
-        content: row.lessonContent || "", // ✅ CRITICAL LINE
-        completed: Boolean(row.completed),
-      });
+      // Check if lesson already exists in this module
+      let lesson = modulesMap[row.moduleId].lessons.find(
+        (l) => l.id === row.lessonId
+      );
+
+      if (!lesson) {
+        lesson = {
+          id: row.lessonId,
+          title: row.lessonTitle,
+          content: row.lessonContent || "",
+          completed: Boolean(row.completed),
+          media: [],
+        };
+        modulesMap[row.moduleId].lessons.push(lesson);
+      }
+
+      // Add media if it exists
+      if (row.mediaId) {
+        const mediaExists = lesson.media.find((m) => m.id === row.mediaId);
+        if (!mediaExists) {
+          lesson.media.push({
+            id: row.mediaId,
+            url: row.mediaUrl,
+            fileName: row.fileName,
+            mediaType: row.mediaType,
+            mimeType: row.mimeType,
+            size: row.fileSize,
+          });
+        }
+      }
     }
 
     res.json({
       id: courseId,
       modules: Object.values(modulesMap),
     });
+
+    const totalLessons = Object.values(modulesMap).reduce(
+      (sum, m) => sum + (m.lessons || []).length,
+      0
+    );
+    const totalMedia = Object.values(modulesMap).reduce(
+      (sum, m) =>
+        sum +
+        (m.lessons || []).reduce((lsum, l) => lsum + (l.media || []).length, 0),
+      0
+    );
+    console.log(
+      `✅ Response sent: ${
+        Object.values(modulesMap).length
+      } modules, ${totalLessons} lessons, ${totalMedia} media files`
+    );
   } catch (err) {
+    console.error("❌ courseDetails error:", err);
     res.status(500).json({ message: err.message });
   }
 };

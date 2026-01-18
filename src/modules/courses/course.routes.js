@@ -18,6 +18,8 @@ const {
   deleteCourse,
 } = require("./course.controller");
 
+const { uploadChapterMedia } = require("./media.controller");
+
 console.log({
   createCourse,
   getMyAssignedCourses,
@@ -36,6 +38,32 @@ const upload = multer({
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
       return cb(new Error("Only DOCX files allowed"));
+    }
+    cb(null, true);
+  },
+});
+
+// Media upload for images and videos (larger file size limit)
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB for media files
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "video/mp4",
+      "video/webm",
+      "video/quicktime",
+    ];
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return cb(
+        new Error(
+          "Only image (JPEG, PNG, GIF, WebP) and video (MP4, WebM, MOV) files allowed"
+        )
+      );
     }
     cb(null, true);
   },
@@ -173,6 +201,17 @@ router.get(
   authMiddleware,
   roleMiddleware("admin", "manager"),
   getCourseCatalog
+);
+
+/**
+ * Upload media (image/video) to chapter
+ */
+router.post(
+  "/:courseId/chapters/:chapterId/media",
+  authMiddleware,
+  roleMiddleware("admin", "manager", "instructor"),
+  mediaUpload.single("file"),
+  uploadChapterMedia
 );
 
 module.exports = router;
