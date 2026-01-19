@@ -5,6 +5,7 @@ const authRoutes = require("./modules/auth/auth.routes");
 const userRoutes = require("./modules/users/user.routes");
 const courseRoutes = require("./modules/courses/course.routes");
 const employeeRoutes = require("./modules/employee/employee.routes");
+const managerRoutes = require("./modules/manager/manager.routes");
 const app = express();
 
 app.use(cors());
@@ -18,5 +19,6 @@ app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
 app.use("/courses", courseRoutes);
 app.use("/employee", employeeRoutes);
+app.use("/manager", managerRoutes);
 
 module.exports = app;
