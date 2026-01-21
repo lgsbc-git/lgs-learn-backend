@@ -25,7 +25,7 @@ app.use(
     origin: [
       "http://localhost:5173", // local frontend
       "http://localhost:3000",
-      "https://your-frontend.onrender.com", // deployed frontend
+      "https://lgs-learn-frontend.onrender.com", // deployed frontend
     ],
     credentials: true,
   }),
