@@ -153,7 +153,7 @@ const fetchCourseContentForEmployee = async (courseId, userId) => {
     }
 
     const existingChapter = modulesMap[row.moduleId].chapters.find(
-      (ch) => ch.id === row.chapterId
+      (ch) => ch.id === row.chapterId,
     );
 
     if (!existingChapter) {
@@ -168,7 +168,7 @@ const fetchCourseContentForEmployee = async (courseId, userId) => {
     // Add media if it exists
     if (row.mediaId) {
       const chapter = modulesMap[row.moduleId].chapters.find(
-        (ch) => ch.id === row.chapterId
+        (ch) => ch.id === row.chapterId,
       );
       if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
         chapter.media.push({
@@ -389,6 +389,7 @@ const fetchCourseCatalog = async () => {
       c.duration,
       c.description,
       c.createdAt,
+      c.createdBy,
       ISNULL((SELECT COUNT(1) FROM CourseAssignments ca WHERE ca.courseId = c.id), 0) AS enrolled
     FROM Courses c
     ORDER BY c.createdAt DESC
@@ -403,7 +404,7 @@ const fetchCourseCatalog = async () => {
 const fetchTotalAssignmentsCount = async () => {
   const pool = await getDbPool();
   const result = await pool.query(
-    `SELECT COUNT(1) AS total FROM CourseAssignments`
+    `SELECT COUNT(1) AS total FROM CourseAssignments`,
   );
   return result.recordset[0]?.total || 0;
 };
@@ -460,7 +461,7 @@ module.exports = {
       }
 
       const existingChapter = modulesMap[row.moduleId].chapters.find(
-        (ch) => ch.id === row.chapterId
+        (ch) => ch.id === row.chapterId,
       );
 
       if (!existingChapter) {
@@ -475,7 +476,7 @@ module.exports = {
       // Add media if it exists
       if (row.mediaId) {
         const chapter = modulesMap[row.moduleId].chapters.find(
-          (ch) => ch.id === row.chapterId
+          (ch) => ch.id === row.chapterId,
         );
         if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
           chapter.media.push({

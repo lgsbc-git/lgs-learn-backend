@@ -10,6 +10,7 @@ const userRoutes = require("./modules/users/user.routes");
 const courseRoutes = require("./modules/courses/course.routes");
 const employeeRoutes = require("./modules/employee/employee.routes");
 const managerRoutes = require("./modules/manager/manager.routes");
+const instructorRoutes = require("./modules/instructor/instructor.routes");
 
 const app = express();
 
@@ -77,6 +78,7 @@ app.use("/users", userRoutes);
 app.use("/courses", courseRoutes);
 app.use("/employee", employeeRoutes);
 app.use("/manager", managerRoutes);
+app.use("/instructor", instructorRoutes);
 
 /* =========================
    ERROR HANDLER
