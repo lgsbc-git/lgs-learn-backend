@@ -69,7 +69,7 @@ const getCourseContentForEmployee = async (req, res) => {
   try {
     const content = await fetchCourseContentForEmployee(
       req.params.courseId,
-      req.user.id
+      req.user.id,
     );
     res.status(200).json(content);
   } catch (err) {
@@ -92,16 +92,73 @@ const getCourseContentForAdmin = async (req, res) => {
 
 /**
  * PATCH /courses/:courseId/content
- * Admin / Manager / Instructor - persist full course content (modules/chapters)
+ * Admin / Manager / Instructor - persist full course content (modules/chapters + quiz)
  */
 const saveCourseContent = async (req, res) => {
   try {
-    const { modules } = req.body;
+    const { modules, quiz } = req.body;
+    const userId = req.user.id;
+    const courseId = req.params.courseId;
+
     if (!Array.isArray(modules)) {
       return res.status(400).json({ message: "modules must be an array" });
     }
 
-    await saveCourseContentForAdmin(req.params.courseId, modules);
+    // Save modules
+    await saveCourseContentForAdmin(courseId, modules);
+
+    // Handle quiz - either save or delete
+    try {
+      const quizService = require("../quiz/quiz.service");
+
+      // First, check if there's an existing quiz for this course
+      const existingQuiz = await quizService.getQuizByCourse(
+        parseInt(courseId),
+      );
+
+      if (!quiz || !quiz.title) {
+        // Quiz is being deleted (quiz is null or has no title)
+        if (existingQuiz && existingQuiz.id) {
+          console.log(
+            "🗑️  Deleting quiz for courseId:",
+            courseId,
+            "quizId:",
+            existingQuiz.id,
+          );
+          await quizService.deleteQuiz(existingQuiz.id);
+          console.log("✅ Quiz deleted successfully");
+        }
+      } else {
+        // Quiz is being saved or updated
+        console.log("Attempting to save quiz for courseId:", courseId);
+        const quizResult = await quizService.createOrUpdateQuiz({
+          courseId: parseInt(courseId),
+          title: quiz.title,
+          description: quiz.description || null,
+          passingScore: quiz.passingScore || 60,
+          timeLimit: quiz.timeLimit || null,
+          showResults: quiz.showResults !== false,
+          showCorrectAnswers: quiz.showCorrectAnswers !== false,
+          questions: (quiz.questions || []).map((q) => ({
+            question: q.question,
+            explanation: q.explanation || null,
+            options: (q.options || []).map((opt) => ({
+              text: opt.text,
+              isCorrect: opt.isCorrect,
+            })),
+          })),
+          createdBy: userId,
+        });
+        console.log("✅ Quiz saved successfully:", quizResult);
+      }
+    } catch (quizErr) {
+      console.error(
+        "❌ Quiz operation failed:",
+        quizErr.message,
+        quizErr.stack,
+      );
+      // Don't fail the entire request if quiz operation fails
+    }
 
     res.status(200).json({ message: "Course content saved successfully" });
   } catch (err) {

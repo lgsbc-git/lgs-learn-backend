@@ -1,5 +1,3 @@
-
-
 // use this while in the local system
 
 // const fs = require("fs");
@@ -10,6 +8,7 @@
 // const env = require("./config/env");
 // const { getDbPool } = require("./config/db");
 // const { initBlobService } = require("./config/blob");
+// const { runMigrations } = require("./migrations/quiz-tables");
 
 // /* ------------------ */
 // /* Server Bootstrap   */
@@ -18,6 +17,9 @@
 //   try {
 //     // Connect to DB
 //     await getDbPool();
+
+//     // Run database migrations
+//     await runMigrations();
 
 //     // Initialize Azure Blob (optional)
 //     try {
@@ -28,19 +30,14 @@
 
 //     // HTTPS options
 //     const sslOptions = {
-//       key: fs.readFileSync(
-//         path.join(__dirname, "../ssl/localhost+1-key.pem")
-//       ),
-//       cert: fs.readFileSync(
-//         path.join(__dirname, "../ssl/localhost+1.pem")
-//       ),
+//       key: fs.readFileSync(path.join(__dirname, "../ssl/localhost+1-key.pem")),
+//       cert: fs.readFileSync(path.join(__dirname, "../ssl/localhost+1.pem")),
 //     };
 
 //     // Start HTTPS server
 //     https.createServer(sslOptions, app).listen(env.port, () => {
 //       console.log(`🔐 HTTPS Server running at https://localhost:${env.port}`);
 //     });
-
 //   } catch (err) {
 //     console.error("❌ Failed to start server:", err.message);
 //     process.exit(1);
@@ -48,7 +45,6 @@
 // };
 
 // startServer();
-
 
 // Production code
 const app = require("./app");
