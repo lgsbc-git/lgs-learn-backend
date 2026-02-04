@@ -90,6 +90,7 @@ const createOrUpdateQuiz = async ({
     // Insert questions and options
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
+      console.log(`📝 Saving question ${i + 1}: "${q.question}"`);
       req = transaction
         .request()
         .input("quizId", sql.Int, quizId)
@@ -108,11 +109,15 @@ const createOrUpdateQuiz = async ({
       // Insert options for this question
       for (let j = 0; j < (q.options || []).length; j++) {
         const opt = q.options[j];
+        const isCorrectBit = opt.isCorrect ? 1 : 0;
+        console.log(
+          `  ✓ Option j=${j}: text="${opt.text}", isCorrect=${opt.isCorrect} (converted to bit: ${isCorrectBit})`,
+        );
         req = transaction
           .request()
           .input("questionId", sql.Int, questionId)
           .input("optionText", sql.NVarChar(sql.MAX), opt.text)
-          .input("isCorrect", sql.Bit, opt.isCorrect ? 1 : 0)
+          .input("isCorrect", sql.Bit, isCorrectBit)
           .input("optionOrder", sql.Int, j + 1);
 
         await req.query(`
@@ -334,7 +339,13 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
         `SELECT isCorrect FROM QuizOptions WHERE id = @optionId`,
       );
 
-      if (optResult.recordset[0]?.isCorrect === 1) {
+      const isCorrect =
+        optResult.recordset[0]?.isCorrect === true ||
+        optResult.recordset[0]?.isCorrect === 1;
+      console.log(
+        `✓ Answer optionId: ${answer.selectedOptionId}, isCorrect: ${isCorrect}`,
+      );
+      if (isCorrect) {
         correctCount++;
       }
     }
@@ -342,6 +353,9 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
     const totalQuestions = answers.length;
     const score =
       totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
+    console.log(
+      `📊 Score Calculation: ${correctCount}/${totalQuestions} = ${score}%`,
+    );
 
     // Get quiz passing score
     let quizReq = transaction.request().input("quizId", sql.Int, quizId);
@@ -392,7 +406,8 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
         );
       }
 
-      const isCorrect = option.isCorrect === 1 ? 1 : 0;
+      const isCorrect =
+        option.isCorrect === true || option.isCorrect === 1 ? 1 : 0;
 
       let recReq = transaction
         .request()
@@ -892,6 +907,15 @@ const getFullSubmissionDetails = async (submissionId) => {
       ORDER BY qq.questionOrder, qo.optionOrder
     `);
 
+    console.log(
+      `🔍 Found ${questionsResult.recordset.length} rows for quizId ${submission.quizId}`,
+    );
+    questionsResult.recordset.forEach((row, idx) => {
+      console.log(
+        `  Row ${idx}: questionId=${row.questionId}, optionId=${row.optionId}, optionText="${row.optionText}", isCorrect=${row.isCorrect}`,
+      );
+    });
+
     // Get student's answers
     const answersResult = await pool
       .request()
@@ -917,10 +941,13 @@ const getFullSubmissionDetails = async (submissionId) => {
         });
       }
       if (row.optionId) {
+        console.log(
+          `📌 Question ${row.questionId} Option: "${row.optionText}", isCorrect: ${row.isCorrect}`,
+        );
         questionMap.get(row.questionId).options.push({
           optionId: row.optionId,
           optionText: row.optionText,
-          isCorrect: row.isCorrect === 1,
+          isCorrect: row.isCorrect === true || row.isCorrect === 1,
         });
       }
     });
@@ -931,7 +958,8 @@ const getFullSubmissionDetails = async (submissionId) => {
       answerMap.set(answer.questionId, {
         selectedOptionId: answer.selectedOptionId,
         selectedOptionText: answer.selectedOptionText,
-        isCorrect: answer.answerIsCorrect === 1,
+        isCorrect:
+          answer.answerIsCorrect === true || answer.answerIsCorrect === 1,
       });
     });
 
@@ -939,6 +967,10 @@ const getFullSubmissionDetails = async (submissionId) => {
       const studentAnswer = answerMap.get(q.questionId);
       return {
         ...q,
+        options: q.options.map((opt) => ({
+          ...opt,
+          isCorrect: opt.isCorrect === true || opt.isCorrect === 1, // Ensure boolean
+        })),
         studentAnswer: studentAnswer || {
           selectedOptionId: null,
           selectedOptionText: null,
@@ -957,7 +989,7 @@ const getFullSubmissionDetails = async (submissionId) => {
       score: submission.score,
       totalQuestions: submission.totalQuestions,
       correctAnswers: submission.correctAnswers,
-      passed: submission.passed === 1,
+      passed: submission.passed === true || submission.passed === 1,
       passingScore: submission.passingScore,
       timeTaken: submission.timeTaken,
       submittedAt: submission.submittedAt,
@@ -977,6 +1009,142 @@ const getFullSubmissionDetails = async (submissionId) => {
   }
 };
 
+/**
+ * Reset quiz attempts for an employee
+ * Deletes the submission so employee can retake the quiz
+ * STAFF: Only instructors, managers, and admins can use this
+ */
+const resetQuizAttempts = async (submissionId, staffUserId) => {
+  const pool = await getDbPool();
+  const transaction = pool.transaction();
+
+  try {
+    await transaction.begin();
+
+    // Get submission details before deletion
+    let getReq = transaction
+      .request()
+      .input("submissionId", sql.Int, submissionId);
+    const submissionResult = await getReq.query(`
+      SELECT quizId, userId FROM QuizSubmissions WHERE id = @submissionId
+    `);
+
+    if (submissionResult.recordset.length === 0) {
+      await transaction.rollback();
+      throw new Error("Submission not found");
+    }
+
+    const { quizId, userId } = submissionResult.recordset[0];
+
+    // Delete associated quiz answers
+    let deleteAnswersReq = transaction
+      .request()
+      .input("submissionId", sql.Int, submissionId);
+    await deleteAnswersReq.query(`
+      DELETE FROM QuizAnswers WHERE submissionId = @submissionId
+    `);
+
+    // Delete the submission
+    let deleteReq = transaction
+      .request()
+      .input("submissionId", sql.Int, submissionId);
+    const deleteResult = await deleteReq.query(`
+      DELETE FROM QuizSubmissions WHERE id = @submissionId
+      SELECT @@ROWCOUNT as rowsAffected
+    `);
+
+    if (deleteResult.recordset[0].rowsAffected === 0) {
+      await transaction.rollback();
+      throw new Error("Failed to delete submission");
+    }
+
+    await transaction.commit();
+
+    return {
+      success: true,
+      message:
+        "Quiz attempts have been reset successfully. Employee can now retake the quiz.",
+      submissionId,
+      quizId,
+      userId,
+    };
+  } catch (err) {
+    await transaction.rollback();
+    console.error("Error resetting quiz attempts:", err);
+    throw new Error(`Failed to reset quiz attempts: ${err.message}`);
+  }
+};
+
+/**
+ * Diagnostic: Get quiz options to check correctness
+ */
+const getQuizDiagnostics = async (quizId) => {
+  const pool = await getDbPool();
+  try {
+    const result = await pool.request().input("quizId", sql.Int, quizId).query(`
+        SELECT 
+          q.id as quizId,
+          q.title,
+          qq.id as questionId,
+          qq.question,
+          qo.id as optionId,
+          qo.optionText,
+          qo.isCorrect,
+          COUNT(*) OVER (PARTITION BY qq.id) as optionCount,
+          SUM(CAST(qo.isCorrect AS INT)) OVER (PARTITION BY qq.id) as correctCount
+        FROM Quizzes q
+        JOIN QuizQuestions qq ON q.id = qq.quizId
+        LEFT JOIN QuizOptions qo ON qq.id = qo.questionId
+        WHERE q.id = @quizId
+        ORDER BY qq.questionOrder, qo.optionOrder
+      `);
+
+    const issues = [];
+    const questionMap = new Map();
+
+    result.recordset.forEach((row) => {
+      if (!questionMap.has(row.questionId)) {
+        questionMap.set(row.questionId, {
+          questionId: row.questionId,
+          question: row.question,
+          optionCount: row.optionCount,
+          correctCount: row.correctCount,
+          options: [],
+        });
+
+        if (row.correctCount === 0 && row.optionCount > 0) {
+          issues.push({
+            type: "NO_CORRECT_ANSWER",
+            questionId: row.questionId,
+            question: row.question,
+            message: `Question has ${row.optionCount} options but none marked as correct`,
+          });
+        }
+      }
+
+      if (row.optionId) {
+        questionMap.get(row.questionId).options.push({
+          optionId: row.optionId,
+          optionText: row.optionText,
+          isCorrect: row.isCorrect === 1,
+        });
+      }
+    });
+
+    return {
+      quizId,
+      hasIssues: issues.length > 0,
+      issues,
+      summary: {
+        totalQuestions: questionMap.size,
+        questionsWithoutCorrectAnswer: issues.length,
+      },
+    };
+  } catch (err) {
+    throw new Error(`Failed to get quiz diagnostics: ${err.message}`);
+  }
+};
+
 module.exports = {
   createOrUpdateQuiz,
   getQuizByCourse,
@@ -992,4 +1160,6 @@ module.exports = {
   approveSubmission,
   rejectSubmission,
   getFullSubmissionDetails,
+  resetQuizAttempts,
+  getQuizDiagnostics,
 };

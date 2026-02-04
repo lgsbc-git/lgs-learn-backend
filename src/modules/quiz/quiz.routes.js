@@ -46,6 +46,14 @@ router.patch(
   quizController.rejectSubmission,
 );
 
+// Reset quiz attempts - allow employee to retake (staff only)
+router.patch(
+  "/submissions/:submissionId/reset-attempts",
+  authMiddleware,
+  roleMiddleware("instructor", "admin", "manager"),
+  quizController.resetQuizAttempts,
+);
+
 // Check if employee can attempt quiz (MUST be before /quizzes/:quizId routes)
 router.get(
   "/quizzes/:quizId/check-attempt",

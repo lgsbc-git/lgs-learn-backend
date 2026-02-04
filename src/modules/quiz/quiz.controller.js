@@ -335,6 +335,34 @@ const rejectSubmission = async (req, res) => {
   }
 };
 
+/**
+ * Reset quiz attempts for an employee
+ * PATCH /submissions/:submissionId/reset-attempts
+ * Staff only
+ */
+const resetQuizAttempts = async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    const staffUserId = req.user.id;
+
+    // Verify user has staff role
+    if (!["admin", "instructor", "manager"].includes(req.user.role)) {
+      return res
+        .status(403)
+        .json({ error: "Only staff can reset quiz attempts" });
+    }
+
+    const result = await quizService.resetQuizAttempts(
+      parseInt(submissionId),
+      staffUserId,
+    );
+    res.json(result);
+  } catch (err) {
+    console.error("Reset attempts error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   saveQuiz,
   getQuizByCourse,
@@ -350,4 +378,5 @@ module.exports = {
   getFullSubmissionDetails,
   approveSubmission,
   rejectSubmission,
+  resetQuizAttempts,
 };

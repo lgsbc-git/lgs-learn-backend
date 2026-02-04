@@ -131,6 +131,7 @@ const saveCourseContent = async (req, res) => {
       } else {
         // Quiz is being saved or updated
         console.log("Attempting to save quiz for courseId:", courseId);
+        console.log("📊 Quiz data received:", JSON.stringify(quiz, null, 2));
         const quizResult = await quizService.createOrUpdateQuiz({
           courseId: parseInt(courseId),
           title: quiz.title,
@@ -142,10 +143,15 @@ const saveCourseContent = async (req, res) => {
           questions: (quiz.questions || []).map((q) => ({
             question: q.question,
             explanation: q.explanation || null,
-            options: (q.options || []).map((opt) => ({
-              text: opt.text,
-              isCorrect: opt.isCorrect,
-            })),
+            options: (q.options || []).map((opt) => {
+              console.log(
+                `  Option mapping: text="${opt.text}", isCorrect=${opt.isCorrect} (type: ${typeof opt.isCorrect})`,
+              );
+              return {
+                text: opt.text,
+                isCorrect: opt.isCorrect,
+              };
+            }),
           })),
           createdBy: userId,
         });

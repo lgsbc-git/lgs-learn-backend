@@ -501,20 +501,11 @@ module.exports = {
     await transaction.begin();
     try {
       // Delete existing contents for the course (must respect foreign keys)
-      // Order: LessonProgress -> ChapterContents -> CourseChapters -> CourseModules
+      // We delete orphaned LessonProgress records only for chapters being removed
+      // Order: ChapterContents -> ChapterMedia -> LessonProgress -> CourseChapters -> CourseModules
 
-      // 1. Delete LessonProgress records first (they reference chapters)
+      // 1. Delete ChapterContents (no foreign key dependency)
       let req = new sql.Request(transaction);
-      await req.input("courseId", courseId).query(`
-        DELETE lp
-        FROM LessonProgress lp
-        JOIN CourseChapters ch ON lp.chapterId = ch.id
-        JOIN CourseModules m ON ch.moduleId = m.id
-        WHERE m.courseId = @courseId
-      `);
-
-      // 2. Delete ChapterContents
-      req = new sql.Request(transaction);
       await req.input("courseId", courseId).query(`
         DELETE cc
         FROM ChapterContents cc
@@ -523,7 +514,27 @@ module.exports = {
         WHERE m.courseId = @courseId
       `);
 
-      // 3. Delete CourseChapters
+      // 2. Delete ChapterMedia
+      req = new sql.Request(transaction);
+      await req.input("courseId", courseId).query(`
+        DELETE cm
+        FROM ChapterMedia cm
+        JOIN CourseChapters ch ON cm.chapterId = ch.id
+        JOIN CourseModules m ON ch.moduleId = m.id
+        WHERE m.courseId = @courseId
+      `);
+
+      // 3. Delete LessonProgress for chapters in this course (required by FK constraint)
+      req = new sql.Request(transaction);
+      await req.input("courseId", courseId).query(`
+        DELETE lp
+        FROM LessonProgress lp
+        JOIN CourseChapters ch ON lp.chapterId = ch.id
+        JOIN CourseModules m ON ch.moduleId = m.id
+        WHERE m.courseId = @courseId
+      `);
+
+      // 4. Delete CourseChapters (now safe without FK conflict)
       req = new sql.Request(transaction);
       await req.input("courseId", courseId).query(`
         DELETE ch
@@ -532,7 +543,7 @@ module.exports = {
         WHERE m.courseId = @courseId
       `);
 
-      // 4. Delete CourseModules
+      // 5. Delete CourseModules
       req = new sql.Request(transaction);
       await req.input("courseId", courseId).query(`
         DELETE FROM CourseModules WHERE courseId = @courseId
