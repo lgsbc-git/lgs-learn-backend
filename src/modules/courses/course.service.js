@@ -29,8 +29,22 @@ const createCourseWithDocx = async ({
 
   const courseId = courseResult.recordset[0].id;
 
-  // 2. Parse DOCX
+  // 2. Parse DOCX (only if provided)
+  if (!docxBuffer) {
+    return { courseId, modulesCreated: false };
+  }
+
   const modules = await parseDocx(docxBuffer);
+
+  // If no modules found, return early with warning
+  if (!modules || modules.length === 0) {
+    return {
+      courseId,
+      modulesCreated: false,
+      warning:
+        "Document structure not recognized. Please follow the required format: '1. Module Title', '1.1 Chapter Title', then content.",
+    };
+  }
 
   // 3. Insert modules, chapters, content
   for (let m = 0; m < modules.length; m++) {
@@ -71,7 +85,7 @@ const createCourseWithDocx = async ({
     }
   }
 
-  return { courseId };
+  return { courseId, modulesCreated: true };
 };
 
 /**

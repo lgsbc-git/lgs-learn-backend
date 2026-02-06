@@ -22,9 +22,9 @@ const createCourse = async (req, res) => {
   try {
     const { title, category, duration, description } = req.body;
 
-    if (!title || !req.file) {
+    if (!title) {
       return res.status(400).json({
-        message: "Title and DOCX file are required",
+        message: "Title is required",
       });
     }
 
@@ -34,12 +34,14 @@ const createCourse = async (req, res) => {
       duration,
       description,
       createdBy: req.user.id,
-      docxBuffer: req.file.buffer,
+      docxBuffer: req.file ? req.file.buffer : null,
     });
 
     res.status(201).json({
       message: "Course created successfully",
       courseId: result.courseId,
+      modulesCreated: result.modulesCreated,
+      warning: result.warning || null,
     });
   } catch (err) {
     res.status(500).json({

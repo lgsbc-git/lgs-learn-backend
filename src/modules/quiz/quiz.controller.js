@@ -112,8 +112,15 @@ const submitQuiz = async (req, res) => {
     const { answers, timeTaken } = req.body;
     const userId = req.user.id;
 
-    if (!answers || answers.length === 0) {
-      return res.status(400).json({ error: "Please answer all questions" });
+    console.log(
+      `📝 Quiz Submission - quizId: ${quizId}, userId: ${userId}, answers: ${answers.length}, timeTaken: ${timeTaken}s`,
+    );
+
+    // Answers can be empty if time expires without answering - this is valid
+    if (answers === undefined || answers === null) {
+      return res
+        .status(400)
+        .json({ error: "Invalid submission: answers field required" });
     }
 
     const result = await quizService.submitQuizAnswers(
@@ -123,6 +130,7 @@ const submitQuiz = async (req, res) => {
       timeTaken || 0,
     );
 
+    console.log(`✅ Quiz submitted successfully - Score: ${result.score}%`);
     res.json({ success: true, ...result });
   } catch (err) {
     console.error("Submit quiz error:", err);

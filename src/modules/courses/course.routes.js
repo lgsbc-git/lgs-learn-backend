@@ -189,7 +189,7 @@ router.delete(
 router.delete(
   "/:courseId",
   authMiddleware,
-  roleMiddleware("admin", "manager"),
+  roleMiddleware("admin", "manager", "instructor"),
   deleteCourse,
 );
 

@@ -5,7 +5,7 @@ const parseDocx = async (buffer) => {
 
   const lines = result.value
     .split("\n")
-    .map(l => l.trim())
+    .map((l) => l.trim())
     .filter(Boolean);
 
   const modules = [];
@@ -13,28 +13,11 @@ const parseDocx = async (buffer) => {
   let currentChapter = null;
 
   for (const line of lines) {
-
     /* =========================
-       MODULE: 1. Module Title
+       CHAPTER: 1.1 Chapter Title (check FIRST, before module check)
     ========================= */
-    if (/^\d+\.\s+/.test(line)) {
-      if (currentModule) {
-        modules.push(currentModule);
-      }
-
-      currentModule = {
-        title: line,
-        chapters: []
-      };
-
-      currentChapter = null;
-      continue;
-    }
-
-    /* =========================
-       CHAPTER: 1.1 Chapter Title
-    ========================= */
-    if (/^\d+\.\d+\s+/.test(line)) {
+    if (/^\d+\.\d+\s/.test(line)) {
+      // Matches "1.1 " or "1.1\t" (must have whitespace after the number)
       if (!currentModule) {
         // Ignore chapters before module
         continue;
@@ -42,7 +25,7 @@ const parseDocx = async (buffer) => {
 
       currentChapter = {
         title: line,
-        content: ""
+        content: "",
       };
 
       currentModule.chapters.push(currentChapter);
@@ -50,9 +33,36 @@ const parseDocx = async (buffer) => {
     }
 
     /* =========================
+       MODULE: 1. Module Title
+    ========================= */
+    if (/^\d+\.\s/.test(line) && !/^\d+\.\d+/.test(line)) {
+      // Matches "1. ", "2. ", etc. but NOT "1.1", "2.2", etc.
+      if (currentModule) {
+        modules.push(currentModule);
+      }
+
+      currentModule = {
+        title: line,
+        chapters: [],
+      };
+
+      currentChapter = null;
+      continue;
+    }
+
+    /* =========================
        CONTENT
     ========================= */
-    if (currentChapter) {
+    if (currentModule) {
+      // If no chapter exists yet, create a default one using module title
+      if (!currentChapter) {
+        currentChapter = {
+          title: currentModule.title, // Use module title as chapter name
+          content: "",
+        };
+        currentModule.chapters.push(currentChapter);
+      }
+
       currentChapter.content += line + "\n\n";
     }
   }

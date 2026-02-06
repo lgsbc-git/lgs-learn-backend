@@ -305,11 +305,15 @@ const canAttemptQuiz = async (courseId, userId) => {
  * Submit quiz answers and calculate score
  */
 const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
+  console.log(
+    `\n🔍 [submitQuizAnswers] Starting submission - quizId: ${quizId}, userId: ${userId}, answers count: ${answers.length}, timeTaken: ${timeTaken}s`,
+  );
   const pool = await getDbPool();
   const transaction = pool.transaction();
 
   try {
     await transaction.begin();
+    console.log("✓ Transaction started");
     let request = transaction.request();
 
     // CHECK: Prevent re-attempts - user can only submit quiz once
@@ -323,10 +327,12 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
     `);
 
     if (attemptCheck.recordset.length > 0) {
+      console.log("❌ Previous attempt found - rejecting submission");
       throw new Error(
         "You have already attempted this quiz. Only one attempt is allowed.",
       );
     }
+    console.log("✓ No previous attempts found");
 
     let correctCount = 0;
 
@@ -365,6 +371,9 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
 
     const passingScore = quizResult.recordset[0].passingScore;
     const passed = score >= passingScore ? 1 : 0;
+    console.log(
+      `🎯 Passing score: ${passingScore}%, Student passed: ${passed === 1 ? "YES" : "NO"}`,
+    );
 
     // Create submission record
     let subReq = transaction
@@ -383,6 +392,7 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
       `);
 
     const submissionId = submissionResult.recordset[0].id;
+    console.log(`✅ QuizSubmission created - submissionId: ${submissionId}`);
 
     // Record individual answers with question and option details
     for (const answer of answers) {
@@ -424,6 +434,7 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
     }
 
     await transaction.commit();
+    console.log(`✅ Transaction committed successfully\n`);
     return {
       submissionId,
       score,
@@ -434,6 +445,7 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
     };
   } catch (err) {
     await transaction.rollback();
+    console.log(`❌ Transaction rolled back - Error: ${err.message}\n`);
     throw new Error(`Failed to submit quiz: ${err.message}`);
   }
 };
