@@ -1,4 +1,4 @@
-// // use this while in the local system
+// use this while in the local system
 
 // const fs = require("fs");
 // const path = require("path");
@@ -17,7 +17,7 @@
 //   try {
 //     // Connect to DB
 //     await getDbPool();
-    
+
 //     // Run database migrations
 //     await runMigrations();
 
@@ -72,7 +72,6 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
-
   } catch (err) {
     console.error("❌ Failed to start server:", err.message);
     process.exit(1);

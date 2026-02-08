@@ -336,6 +336,16 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
 
     let correctCount = 0;
 
+    // Get total questions in the quiz FIRST
+    let totalQuestionsReq = transaction
+      .request()
+      .input("quizId", sql.Int, quizId);
+    const totalQuestionsResult = await totalQuestionsReq.query(
+      `SELECT COUNT(*) as total FROM QuizQuestions WHERE quizId = @quizId`,
+    );
+    const totalQuestions = totalQuestionsResult.recordset[0].total || 0;
+    console.log(`📚 Total questions in quiz: ${totalQuestions}`);
+
     // Verify each answer and count correct ones
     for (const answer of answers) {
       let ansReq = transaction
@@ -356,11 +366,12 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
       }
     }
 
-    const totalQuestions = answers.length;
+    // Score is calculated as: (correct answers / total questions in quiz) * 100
+    // This means unattempted questions count as wrong
     const score =
       totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
     console.log(
-      `📊 Score Calculation: ${correctCount}/${totalQuestions} = ${score}%`,
+      `📊 Score Calculation: ${correctCount}/${totalQuestions} = ${score}% (attempted: ${answers.length}/${totalQuestions})`,
     );
 
     // Get quiz passing score
