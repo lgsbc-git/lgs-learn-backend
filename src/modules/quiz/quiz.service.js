@@ -809,12 +809,15 @@ const rejectSubmission = async (submissionId, staffUserId, rejectionReason) => {
   try {
     await transaction.begin();
 
-    // Get submission details before deletion
+    // Get submission details and course info
     let getReq = transaction
       .request()
       .input("submissionId", sql.Int, submissionId);
     const submissionResult = await getReq.query(`
-      SELECT quizId, userId FROM QuizSubmissions WHERE id = @submissionId
+      SELECT qs.quizId, qs.userId, q.courseId 
+      FROM QuizSubmissions qs
+      JOIN Quizzes q ON q.id = qs.quizId
+      WHERE qs.id = @submissionId
     `);
 
     if (submissionResult.recordset.length === 0) {
@@ -822,9 +825,9 @@ const rejectSubmission = async (submissionId, staffUserId, rejectionReason) => {
       throw new Error("Submission not found");
     }
 
-    const { quizId, userId } = submissionResult.recordset[0];
+    const { quizId, userId, courseId } = submissionResult.recordset[0];
 
-    // Delete associated quiz answers
+    // Step 1: Delete associated quiz answers
     let deleteAnswersReq = transaction
       .request()
       .input("submissionId", sql.Int, submissionId);
@@ -832,7 +835,7 @@ const rejectSubmission = async (submissionId, staffUserId, rejectionReason) => {
       DELETE FROM QuizAnswers WHERE submissionId = @submissionId
     `);
 
-    // Delete the submission (rejection = removal)
+    // Step 2: Delete the submission (rejection = removal)
     let deleteReq = transaction
       .request()
       .input("submissionId", sql.Int, submissionId);
@@ -840,15 +843,54 @@ const rejectSubmission = async (submissionId, staffUserId, rejectionReason) => {
       DELETE FROM QuizSubmissions WHERE id = @submissionId
     `);
 
+    // Step 3: RESET COURSE PROGRESS - Delete all lesson progress for this employee and course
+    // This resets the employee's course progress to 0%
+    let resetProgressReq = transaction
+      .request()
+      .input("userId", sql.Int, userId)
+      .input("courseId", sql.Int, courseId);
+
+    await resetProgressReq.query(`
+      DELETE FROM LessonProgress 
+      WHERE userId = @userId 
+        AND chapterId IN (
+          SELECT ch.id 
+          FROM CourseChapters ch
+          JOIN CourseModules m ON m.id = ch.moduleId
+          WHERE m.courseId = @courseId
+        )
+    `);
+
+    // Step 4: Log the rejection for audit trail
+    let logReq = transaction
+      .request()
+      .input("submissionId", sql.Int, submissionId)
+      .input("staffUserId", sql.Int, staffUserId)
+      .input("userId", sql.Int, userId)
+      .input("courseId", sql.Int, courseId)
+      .input("quizId", sql.Int, quizId)
+      .input("rejectionReason", sql.NVarChar(sql.MAX), rejectionReason)
+      .input("rejectedAt", sql.DateTime, new Date());
+
+    await logReq.query(`
+      INSERT INTO QuizSubmissionRejectionLog (submissionId, staffUserId, employeeUserId, courseId, quizId, rejectionReason, rejectedAt)
+      VALUES (@submissionId, @staffUserId, @userId, @courseId, @quizId, @rejectionReason, @rejectedAt)
+    `);
+
     await transaction.commit();
+
+    console.log(
+      `✅ Submission ${submissionId} rejected. Course progress reset for user ${userId} in course ${courseId}`,
+    );
 
     return {
       success: true,
       message:
-        "Submission rejected successfully. Employee must retake the quiz.",
+        "Submission rejected successfully. Employee's course progress has been reset to 0% and must complete the course again from the beginning.",
       submissionId,
       quizId,
       userId,
+      courseId,
     };
   } catch (err) {
     await transaction.rollback();
