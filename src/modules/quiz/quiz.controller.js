@@ -191,7 +191,7 @@ const getCourseQuizSubmissions = async (req, res) => {
         .input("courseId", require("../../config/db").sql.Int, courseId)
         .input("instructorId", require("../../config/db").sql.Int, userId)
         .query(
-          `SELECT id FROM Courses WHERE id = @courseId AND instructorId = @instructorId`,
+          `SELECT id FROM Courses WHERE id = @courseId AND createdBy = @instructorId`,
         );
 
       if (courseOwner.recordset.length === 0) {
