@@ -101,28 +101,31 @@ exports.createTeam = async (req, res) => {
 exports.getTeamDetails = async (req, res) => {
   try {
     const { teamId } = req.params;
-    const managerId = req.user.id;
     const pool = await getDbPool();
 
+    // Validate teamId is a number
+    const parsedTeamId = parseInt(teamId, 10);
+    if (isNaN(parsedTeamId)) {
+      return res.status(400).json({ message: "Invalid team ID" });
+    }
+
     // Get team details
-    const teamResult = await pool
-      .request()
-      .input("teamId", teamId)
-      .input("managerId", managerId).query(`
-      SELECT 
-        t.id,
-        t.teamName,
-        t.description,
-        t.departmentName,
-        t.teamSize,
-        t.createdAt,
-        t.updatedAt,
-        COUNT(tm.id) AS memberCount
-      FROM Teams t
-      LEFT JOIN TeamMembers tm ON tm.teamId = t.id
-      WHERE t.id = @teamId AND t.managerId = @managerId
-      GROUP BY t.id, t.teamName, t.description, t.departmentName, t.teamSize, t.createdAt, t.updatedAt
-    `);
+    const teamResult = await pool.request().input("teamId", parsedTeamId)
+      .query(`
+        SELECT 
+          t.id,
+          t.teamName,
+          t.description,
+          t.departmentName,
+          t.teamSize,
+          t.createdAt,
+          t.updatedAt,
+          COUNT(DISTINCT tm.id) AS memberCount
+        FROM Teams t
+        LEFT JOIN TeamMembers tm ON tm.teamId = t.id
+        WHERE t.id = @teamId
+        GROUP BY t.id, t.teamName, t.description, t.departmentName, t.teamSize, t.createdAt, t.updatedAt
+      `);
 
     if (teamResult.recordset.length === 0) {
       return res.status(404).json({ message: "Team not found" });
@@ -130,27 +133,179 @@ exports.getTeamDetails = async (req, res) => {
 
     const team = teamResult.recordset[0];
 
-    // Get team members with their course progress
-    const membersResult = await pool.request().input("teamId", teamId).query(`
-      SELECT 
-        u.id,
-        u.name AS name,
-        u.email,
-        u.role,
-        tm.roleInTeam,
-        tm.addedAt
-      FROM TeamMembers tm
-      JOIN Users u ON u.id = tm.userId
-      WHERE tm.teamId = @teamId
-      ORDER BY u.name
-    `);
+    // Get team members with their basic info
+    const membersResult = await pool.request().input("teamId", parsedTeamId)
+      .query(`
+        SELECT 
+          u.id,
+          u.name,
+          u.email,
+          u.role,
+          tm.roleInTeam,
+          tm.addedAt,
+          tm.addedAt AS joinedDate
+        FROM TeamMembers tm
+        JOIN Users u ON u.id = tm.userId
+        WHERE tm.teamId = @teamId
+        ORDER BY u.name
+      `);
+
+    // Build response with all members' data
+    const members = [];
+
+    for (const member of membersResult.recordset) {
+      try {
+        console.log(
+          `\n📊 Processing member: ${member.name} (ID: ${member.id})`,
+        );
+
+        // Get courses for this member
+        const coursesResult = await pool.request().input("userId", member.id)
+          .query(`
+            SELECT
+              ca.id AS assignmentId,
+              c.id AS courseId,
+              c.title AS courseName,
+              c.category AS domain,
+              ca.assignmentType,
+              ca.assignedAt AS enrolledDate,
+              ca.dueDate AS deadline,
+              ca.completedAt AS completedDate
+            FROM CourseAssignments ca
+            JOIN Courses c ON c.id = ca.courseId
+            WHERE ca.userId = @userId
+            ORDER BY ca.assignedAt DESC
+          `);
+
+        console.log(
+          `✅ Courses found for member ${member.id}: ${coursesResult.recordset.length}`,
+        );
+        console.log(`📋 Course Details:`, coursesResult.recordset);
+
+        const enrolledCourses = [];
+        let coursesInProgress = 0;
+        let coursesCompleted = 0;
+        let mandatoryPending = 0;
+
+        // Calculate progress for each course
+        for (const course of coursesResult.recordset) {
+          console.log(`  � Processing course: ${course.courseName}`);
+
+          const progressResult = await pool
+            .request()
+            .input("userId", member.id)
+            .input("courseId", course.courseId).query(`
+              SELECT
+                COUNT(DISTINCT ch.id) AS totalLessons,
+                COUNT(DISTINCT CASE WHEN lp.completed = 1 THEN ch.id END) AS completedLessons
+              FROM CourseChapters ch
+              LEFT JOIN LessonProgress lp ON lp.chapterId = ch.id AND lp.userId = @userId
+              JOIN CourseModules m ON m.id = ch.moduleId
+              WHERE m.courseId = @courseId
+            `);
+
+          const progress = progressResult.recordset[0];
+
+          // Calculate progress percentage
+          const totalLessons = progress ? progress.totalLessons : 0;
+          const completedLessons = progress ? progress.completedLessons : 0;
+          const progressPercentage =
+            totalLessons > 0
+              ? Math.round((completedLessons / totalLessons) * 100)
+              : 0;
+
+          // Determine status based on progress percentage
+          let status = "Not Started";
+          if (progressPercentage === 100) {
+            status = "Completed";
+            coursesCompleted++;
+          } else if (progressPercentage > 0 && progressPercentage < 100) {
+            status = "In Progress";
+            coursesInProgress++;
+          } else {
+            status = "Not Started";
+            mandatoryPending++;
+          }
+
+          console.log(
+            `     Progress: ${progressPercentage}% (${completedLessons}/${totalLessons} lessons), Status: ${status}`,
+          );
+
+          enrolledCourses.push({
+            courseId: course.courseId,
+            courseName: course.courseName,
+            domain: course.domain,
+            progress: progressPercentage,
+            status: status,
+            enrolledDate: course.enrolledDate,
+            deadline: course.deadline,
+            completedDate: course.completedDate,
+            assignmentType: course.assignmentType,
+          });
+        }
+
+        members.push({
+          id: member.id,
+          name: member.name,
+          email: member.email,
+          role: member.role,
+          roleInTeam: member.roleInTeam,
+          addedAt: member.addedAt,
+          joinedDate: member.joinedDate,
+          enrolledCourses: enrolledCourses,
+          coursesInProgress: coursesInProgress,
+          coursesCompleted: coursesCompleted,
+          mandatoryPending: mandatoryPending,
+        });
+
+        console.log(
+          `✅ Member ${member.name} added with ${enrolledCourses.length} courses`,
+        );
+      } catch (memberError) {
+        console.error(
+          `Error loading courses for member ${member.id}:`,
+          memberError.message,
+        );
+        // Add member without courses if fetch fails
+        members.push({
+          id: member.id,
+          name: member.name,
+          email: member.email,
+          role: member.role,
+          roleInTeam: member.roleInTeam,
+          addedAt: member.addedAt,
+          joinedDate: member.joinedDate,
+          enrolledCourses: [],
+          coursesInProgress: 0,
+          coursesCompleted: 0,
+          mandatoryPending: 0,
+        });
+      }
+    }
+
+    console.log(
+      `\n🎯 Final Response - Team: ${team.teamName}, Members: ${members.length}`,
+    );
+    members.forEach((m) => {
+      console.log(`   - ${m.name}: ${m.enrolledCourses.length} courses`);
+    });
 
     res.json({
-      ...team,
-      members: membersResult.recordset,
+      id: team.id,
+      teamName: team.teamName,
+      description: team.description,
+      departmentName: team.departmentName,
+      teamSize: team.teamSize,
+      memberCount: team.memberCount,
+      createdAt: team.createdAt,
+      updatedAt: team.updatedAt,
+      members: members,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("❌ getTeamDetails Error:", err.message);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch team details", error: err.message });
   }
 };
 
@@ -509,6 +664,94 @@ exports.updateMemberRole = async (req, res) => {
 
     res.json({ message: "Member role updated successfully" });
   } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* =========================
+   GET ENROLLED COURSES FOR EMPLOYEE
+========================= */
+exports.getEmployeeEnrolledCourses = async (req, res) => {
+  try {
+    const employeeId = req.params.employeeId;
+    console.log(
+      `\n📍 getEmployeeEnrolledCourses called for employeeId: ${employeeId}`,
+    );
+    console.log(`📍 User from token:`, req.user);
+
+    const pool = await getDbPool();
+
+    const coursesResult = await pool.request().input("employeeId", employeeId)
+      .query(`
+        SELECT 
+          c.id,
+          c.title,
+          c.category,
+          c.duration,
+          ca.assignmentType,
+          ca.assignedAt,
+          ca.courseId
+        FROM CourseAssignments ca
+        JOIN Courses c ON ca.courseId = c.id
+        WHERE ca.userId = @employeeId
+        ORDER BY ca.assignedAt DESC
+      `);
+
+    console.log(
+      `✅ Found ${coursesResult.recordset.length} enrolled courses for employee ${employeeId}`,
+    );
+    console.log(`📋 Courses:`, coursesResult.recordset);
+
+    const courses = [];
+
+    // Calculate progress for each course
+    for (const course of coursesResult.recordset) {
+      console.log(
+        `\n  🔄 Processing course: ${course.title} (ID: ${course.courseId})`,
+      );
+
+      const progressResult = await pool
+        .request()
+        .input("userId", employeeId)
+        .input("courseId", course.courseId).query(`
+          SELECT
+            COUNT(DISTINCT ch.id) AS totalLessons,
+            COUNT(DISTINCT CASE WHEN lp.completed = 1 THEN ch.id END) AS completedLessons
+          FROM CourseChapters ch
+          LEFT JOIN LessonProgress lp ON lp.chapterId = ch.id AND lp.userId = @userId
+          JOIN CourseModules m ON m.id = ch.moduleId
+          WHERE m.courseId = @courseId
+        `);
+
+      const progress = progressResult.recordset[0];
+      const totalLessons = progress ? progress.totalLessons : 0;
+      const completedLessons = progress ? progress.completedLessons : 0;
+      const progressPercentage =
+        totalLessons > 0
+          ? Math.round((completedLessons / totalLessons) * 100)
+          : 0;
+
+      console.log(
+        `     ✅ Progress: ${progressPercentage}% (${completedLessons}/${totalLessons} lessons)`,
+      );
+
+      courses.push({
+        id: course.id,
+        title: course.title,
+        category: course.category,
+        duration: course.duration,
+        assignmentType: course.assignmentType,
+        assignedAt: course.assignedAt,
+        progress: progressPercentage,
+      });
+    }
+
+    console.log(`\n✅ Final response with ${courses.length} courses:`);
+    console.log(courses);
+
+    res.json(courses);
+  } catch (err) {
+    console.error(`❌ Error in getEmployeeEnrolledCourses:`, err);
     res.status(500).json({ message: err.message });
   }
 };

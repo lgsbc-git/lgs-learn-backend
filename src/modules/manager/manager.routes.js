@@ -23,6 +23,7 @@ const {
   getAvailableEmployees,
   getAllEmployees,
   updateMemberRole,
+  getEmployeeEnrolledCourses,
 } = require("./team.controller");
 
 const router = express.Router();
@@ -131,6 +132,13 @@ router.put(
   authMiddleware,
   roleMiddleware("manager"),
   updateMemberRole,
+);
+
+router.get(
+  "/employees/:employeeId/enrolled-courses",
+  authMiddleware,
+  roleMiddleware("manager"),
+  getEmployeeEnrolledCourses,
 );
 
 module.exports = router;
