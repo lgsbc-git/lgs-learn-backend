@@ -334,8 +334,32 @@ const deleteCourseFully = async (courseId) => {
   const transaction = new sql.Transaction(pool);
   await transaction.begin();
   try {
-    // Delete lesson progress for all users in this course
+    // Delete quiz submission rejection logs
     let req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE qsrl
+      FROM QuizSubmissionRejectionLog qsrl
+      JOIN Quizzes q ON qsrl.quizId = q.id
+      WHERE q.courseId = @courseId
+    `);
+
+    // Delete quiz submissions
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE qs
+      FROM QuizSubmissions qs
+      JOIN Quizzes q ON qs.quizId = q.id
+      WHERE q.courseId = @courseId
+    `);
+
+    // Delete quizzes
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE FROM Quizzes WHERE courseId = @courseId
+    `);
+
+    // Delete lesson progress for all users in this course
+    req = new sql.Request(transaction);
     await req.input("courseId", courseId).query(`
       DELETE lp
       FROM LessonProgress lp
@@ -373,6 +397,12 @@ const deleteCourseFully = async (courseId) => {
     req = new sql.Request(transaction);
     await req.input("courseId", courseId).query(`
       DELETE FROM CourseAssignments WHERE courseId = @courseId
+    `);
+
+    // Delete test submissions
+    req = new sql.Request(transaction);
+    await req.input("courseId", courseId).query(`
+      DELETE FROM TestSubmissions WHERE courseId = @courseId
     `);
 
     // Delete the course

@@ -9,6 +9,7 @@ const {
   pendingEvaluations,
   recentActivity,
   myTeam,
+  teamQuizSubmissions,
 } = require("./manager.controller");
 
 const {
@@ -48,6 +49,13 @@ router.get(
   authMiddleware,
   roleMiddleware("manager"),
   pendingEvaluations,
+);
+
+router.get(
+  "/evaluations/quiz-submissions",
+  authMiddleware,
+  roleMiddleware("manager"),
+  teamQuizSubmissions,
 );
 
 router.get(

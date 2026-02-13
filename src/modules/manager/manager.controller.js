@@ -281,6 +281,55 @@ exports.recentActivity = async (req, res) => {
 };
 
 /* =========================
+   TEAM QUIZ SUBMISSIONS
+========================= */
+exports.teamQuizSubmissions = async (req, res) => {
+  try {
+    const managerId = req.user.id;
+    const pool = await getDbPool();
+
+    const result = await pool.request().input("managerId", managerId).query(`
+      SELECT
+        qs.id as submissionId,
+        qs.quizId,
+        q.title as quizTitle,
+        c.title as courseName,
+        q.passingScore,
+        qs.userId,
+        u.name,
+        CASE WHEN CHARINDEX(' ', u.name) > 0 
+          THEN SUBSTRING(u.name, 1, CHARINDEX(' ', u.name) - 1)
+          ELSE u.name
+        END as firstName,
+        CASE WHEN CHARINDEX(' ', u.name) > 0 
+          THEN SUBSTRING(u.name, CHARINDEX(' ', u.name) + 1, LEN(u.name))
+          ELSE ''
+        END as lastName,
+        u.email,
+        qs.score,
+        qs.passed,
+        qs.totalQuestions,
+        qs.correctAnswers,
+        qs.timeTaken,
+        qs.submittedAt,
+        qs.attemptNumber
+      FROM QuizSubmissions qs
+      INNER JOIN Quizzes q ON qs.quizId = q.id
+      INNER JOIN Courses c ON q.courseId = c.id
+      INNER JOIN Users u ON qs.userId = u.id
+      INNER JOIN TeamMembers tm ON tm.userId = u.id
+      INNER JOIN Teams t ON t.id = tm.teamId
+      WHERE t.managerId = @managerId
+      ORDER BY c.id, qs.submittedAt DESC
+    `);
+
+    res.json({ submissions: result.recordset });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* =========================
    MY TEAM
 ========================= */
 exports.myTeam = async (req, res) => {
@@ -324,10 +373,12 @@ function formatTime(date) {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
 
-  return then.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // Format as dd/mm/yyyy hh:mm
+  const day = String(then.getDate()).padStart(2, "0");
+  const month = String(then.getMonth() + 1).padStart(2, "0");
+  const year = then.getFullYear();
+  const hours12 = String(then.getHours()).padStart(2, "0");
+  const mins = String(then.getMinutes()).padStart(2, "0");
+
+  return `${day}/${month}/${year} ${hours12}:${mins}`;
 }

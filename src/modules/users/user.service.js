@@ -103,10 +103,58 @@ const createUser = async ({ name, email, role }) => {
   return { userId: res.recordset[0].id, password: plainPassword };
 };
 
+/**
+ * Admin: delete user from database
+ */
+const deleteUser = async (userId) => {
+  const pool = await getDbPool();
+
+  // Check if user exists
+  const userCheck = await pool.request().input("id", userId).query(`
+    SELECT id FROM Users WHERE id = @id
+  `);
+
+  if (userCheck.recordset.length === 0) {
+    throw new Error("User not found");
+  }
+
+  // Delete related records first (foreign key constraints)
+  // Delete from LessonProgress
+  await pool.request().input("userId", userId).query(`
+    DELETE FROM LessonProgress WHERE userId = @userId
+  `);
+
+  // Delete from QuizSubmissions
+  await pool.request().input("userId", userId).query(`
+    DELETE FROM QuizSubmissions WHERE userId = @userId
+  `);
+
+  // Delete from TeamMembers
+  await pool.request().input("userId", userId).query(`
+    DELETE FROM TeamMembers WHERE userId = @userId
+  `);
+
+  // Delete from CourseAssignments
+  await pool.request().input("userId", userId).query(`
+    DELETE FROM CourseAssignments WHERE userId = @userId
+  `);
+
+  // Delete from TestSubmissions
+  await pool.request().input("userId", userId).query(`
+    DELETE FROM TestSubmissions WHERE userId = @userId
+  `);
+
+  // Delete the user
+  await pool.request().input("id", userId).query(`
+    DELETE FROM Users WHERE id = @id
+  `);
+};
+
 module.exports = {
   fetchMyProfile,
   fetchAllUsers,
   setUserStatus,
   setUserRole,
   createUser,
+  deleteUser,
 };

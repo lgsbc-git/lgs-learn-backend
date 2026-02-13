@@ -347,21 +347,42 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
     console.log(`📚 Total questions in quiz: ${totalQuestions}`);
 
     // Verify each answer and count correct ones
+    // Support both single answers (selectedOptionId) and multiple answers (selectedOptionIds)
     for (const answer of answers) {
+      const optionIds =
+        answer.selectedOptionIds ||
+        (answer.selectedOptionId ? [answer.selectedOptionId] : []);
+
+      if (optionIds.length === 0) {
+        console.log(`⚠️ Question ${answer.questionId} has no selected options`);
+        continue;
+      }
+
+      // For multi-answer questions, check if ALL selected options are correct
+      // and if ALL correct options are selected
       let ansReq = transaction
         .request()
-        .input("optionId", sql.Int, answer.selectedOptionId);
-      const optResult = await ansReq.query(
-        `SELECT isCorrect FROM QuizOptions WHERE id = @optionId`,
+        .input("questionId", sql.Int, answer.questionId);
+      const correctOptionsResult = await ansReq.query(
+        `SELECT id FROM QuizOptions WHERE questionId = @questionId AND isCorrect = 1`,
       );
 
-      const isCorrect =
-        optResult.recordset[0]?.isCorrect === true ||
-        optResult.recordset[0]?.isCorrect === 1;
-      console.log(
-        `✓ Answer optionId: ${answer.selectedOptionId}, isCorrect: ${isCorrect}`,
+      const correctOptionIds = correctOptionsResult.recordset.map(
+        (opt) => opt.id,
       );
-      if (isCorrect) {
+
+      // Check if the selected options match the correct options exactly
+      const selectedSet = new Set(optionIds.map((id) => parseInt(id)));
+      const correctSet = new Set(correctOptionIds);
+
+      const isCompletelyCorrect =
+        selectedSet.size === correctSet.size &&
+        Array.from(selectedSet).every((id) => correctSet.has(id));
+
+      console.log(
+        `✓ Question ${answer.questionId}, selected: [${Array.from(selectedSet)}], correct: [${Array.from(correctSet)}], isCorrect: ${isCompletelyCorrect}`,
+      );
+      if (isCompletelyCorrect) {
         correctCount++;
       }
     }
@@ -406,42 +427,54 @@ const submitQuizAnswers = async (quizId, userId, answers, timeTaken) => {
     console.log(`✅ QuizSubmission created - submissionId: ${submissionId}`);
 
     // Record individual answers with question and option details
+    // Support both single answers (selectedOptionId) and multiple answers (selectedOptionIds)
     for (const answer of answers) {
-      let ansReq2 = transaction
-        .request()
-        .input("optionId", sql.Int, answer.selectedOptionId)
-        .input("questionId", sql.Int, answer.questionId);
+      const optionIds =
+        answer.selectedOptionIds ||
+        (answer.selectedOptionId ? [answer.selectedOptionId] : []);
 
-      // Get option and question details
-      const optResult = await ansReq2.query(`
-        SELECT qo.id, qo.optionText, qo.isCorrect, qq.question
-        FROM QuizOptions qo
-        JOIN QuizQuestions qq ON qo.questionId = qq.id
-        WHERE qo.id = @optionId AND qq.id = @questionId
-      `);
+      // Record each selected option as a separate answer record
+      for (const optionId of optionIds) {
+        let ansReq2 = transaction
+          .request()
+          .input("optionId", sql.Int, optionId)
+          .input("questionId", sql.Int, answer.questionId);
 
-      const option = optResult.recordset[0];
-      if (!option) {
-        throw new Error(
-          `Invalid question or option: ${answer.questionId}, ${answer.selectedOptionId}`,
-        );
+        // Get option and question details
+        const optResult = await ansReq2.query(`
+          SELECT qo.id, qo.optionText, qo.isCorrect, qq.question
+          FROM QuizOptions qo
+          JOIN QuizQuestions qq ON qo.questionId = qq.id
+          WHERE qo.id = @optionId AND qq.id = @questionId
+        `);
+
+        const option = optResult.recordset[0];
+        if (!option) {
+          throw new Error(
+            `Invalid question or option: ${answer.questionId}, ${optionId}`,
+          );
+        }
+
+        const isCorrect =
+          option.isCorrect === true || option.isCorrect === 1 ? 1 : 0;
+
+        let recReq = transaction
+          .request()
+          .input("submissionId", sql.Int, submissionId)
+          .input("questionId", sql.Int, answer.questionId)
+          .input("selectedOptionId", sql.Int, optionId)
+          .input("isCorrect", sql.Bit, isCorrect)
+          .input("questionText", sql.NVarChar(sql.MAX), option.question)
+          .input(
+            "selectedOptionText",
+            sql.NVarChar(sql.MAX),
+            option.optionText,
+          );
+        await recReq.query(`
+          INSERT INTO QuizAnswers (submissionId, questionId, selectedOptionId, isCorrect, questionText, selectedOptionText)
+          VALUES (@submissionId, @questionId, @selectedOptionId, @isCorrect, @questionText, @selectedOptionText)
+        `);
       }
-
-      const isCorrect =
-        option.isCorrect === true || option.isCorrect === 1 ? 1 : 0;
-
-      let recReq = transaction
-        .request()
-        .input("submissionId", sql.Int, submissionId)
-        .input("questionId", sql.Int, answer.questionId)
-        .input("selectedOptionId", sql.Int, answer.selectedOptionId)
-        .input("isCorrect", sql.Bit, isCorrect)
-        .input("questionText", sql.NVarChar(sql.MAX), option.question)
-        .input("selectedOptionText", sql.NVarChar(sql.MAX), option.optionText);
-      await recReq.query(`
-        INSERT INTO QuizAnswers (submissionId, questionId, selectedOptionId, isCorrect, questionText, selectedOptionText)
-        VALUES (@submissionId, @questionId, @selectedOptionId, @isCorrect, @questionText, @selectedOptionText)
-      `);
     }
 
     await transaction.commit();
@@ -1018,29 +1051,78 @@ const getFullSubmissionDetails = async (submissionId) => {
     });
 
     // Add student's answers to questions
+    // For multi-answer questions, group all selected options and determine overall correctness
     const answerMap = new Map();
+    const questionAnswersMap = new Map(); // Map of questionId to array of answers
+
     answersResult.recordset.forEach((answer) => {
-      answerMap.set(answer.questionId, {
-        selectedOptionId: answer.selectedOptionId,
-        selectedOptionText: answer.selectedOptionText,
-        isCorrect:
-          answer.answerIsCorrect === true || answer.answerIsCorrect === 1,
-      });
+      if (!questionAnswersMap.has(answer.questionId)) {
+        questionAnswersMap.set(answer.questionId, []);
+      }
+      questionAnswersMap.get(answer.questionId).push(answer);
     });
 
     const questionsWithAnswers = Array.from(questionMap.values()).map((q) => {
-      const studentAnswer = answerMap.get(q.questionId);
+      const questionAnswers = questionAnswersMap.get(q.questionId) || [];
+      const correctOptions = q.options.filter(
+        (opt) => opt.isCorrect === true || opt.isCorrect === 1,
+      );
+
+      let studentAnswer;
+
+      if (questionAnswers.length === 0) {
+        // Not attempted
+        studentAnswer = {
+          selectedOptionId: null,
+          selectedOptionText: null,
+          selectedOptionIds: [],
+          isCorrect: false,
+        };
+      } else if (questionAnswers.length === 1 && correctOptions.length === 1) {
+        // Single answer question - use individual answer's correctness
+        const answer = questionAnswers[0];
+        studentAnswer = {
+          selectedOptionId: answer.selectedOptionId,
+          selectedOptionText: answer.selectedOptionText,
+          selectedOptionIds: [answer.selectedOptionId],
+          isCorrect:
+            answer.answerIsCorrect === true || answer.answerIsCorrect === 1,
+        };
+      } else {
+        // Multi-answer question - check if ALL selected options are correct AND all correct options are selected
+        const selectedOptionIds = questionAnswers.map(
+          (a) => a.selectedOptionId,
+        );
+        const correctOptionIds = correctOptions.map((opt) => opt.optionId);
+
+        const selectedSet = new Set(selectedOptionIds);
+        const correctSet = new Set(correctOptionIds);
+
+        // Question is correct only if selected options exactly match correct options
+        const isCompletelyCorrect =
+          selectedSet.size === correctSet.size &&
+          Array.from(selectedSet).every((id) => correctSet.has(id));
+
+        const selectedOptionTexts = questionAnswers.map(
+          (a) => a.selectedOptionText,
+        );
+
+        studentAnswer = {
+          selectedOptionId: questionAnswers[0].selectedOptionId, // Primary answer for backward compatibility
+          selectedOptionText: questionAnswers[0].selectedOptionText,
+          selectedOptionIds: selectedOptionIds,
+          selectedOptionTexts: selectedOptionTexts,
+          isCorrect: isCompletelyCorrect, // This is the overall question correctness
+        };
+      }
+
       return {
         ...q,
         options: q.options.map((opt) => ({
           ...opt,
           isCorrect: opt.isCorrect === true || opt.isCorrect === 1, // Ensure boolean
         })),
-        studentAnswer: studentAnswer || {
-          selectedOptionId: null,
-          selectedOptionText: null,
-          isCorrect: false,
-        },
+        studentAnswer: studentAnswer,
       };
     });
 

@@ -6,6 +6,7 @@ const {
   getAllUsers,
   updateUserStatus,
   createUser,
+  deleteUser,
 } = require("./user.controller");
 
 const router = express.Router();
@@ -32,7 +33,7 @@ router.patch(
   "/:id/status",
   authMiddleware,
   roleMiddleware("admin"),
-  updateUserStatus
+  updateUserStatus,
 );
 
 /**
@@ -43,7 +44,12 @@ router.patch(
   authMiddleware,
   roleMiddleware("admin"),
   (req, res, next) =>
-    require("./user.controller").updateUserRole(req, res, next)
+    require("./user.controller").updateUserRole(req, res, next),
 );
+
+/**
+ * Admin: delete user
+ */
+router.delete("/:id", authMiddleware, roleMiddleware("admin"), deleteUser);
 
 module.exports = router;
