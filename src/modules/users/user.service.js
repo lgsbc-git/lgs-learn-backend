@@ -119,6 +119,13 @@ const deleteUser = async (userId) => {
   }
 
   // Delete related records first (foreign key constraints)
+  // Delete from QuizSubmissionRejectionLog (must come before QuizSubmissions)
+  // Note: Delete records where user is either the employee or the staff who rejected
+  await pool.request().input("userId", userId).query(`
+    DELETE FROM QuizSubmissionRejectionLog 
+    WHERE employeeUserId = @userId OR staffUserId = @userId
+  `);
+
   // Delete from LessonProgress
   await pool.request().input("userId", userId).query(`
     DELETE FROM LessonProgress WHERE userId = @userId
