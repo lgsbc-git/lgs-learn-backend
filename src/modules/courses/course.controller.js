@@ -181,7 +181,7 @@ const saveCourseContent = async (req, res) => {
 const assignCourseToUsers = async (req, res) => {
   try {
     const { courseId } = req.params;
-    const { userIds, assignmentType } = req.body;
+    const { userIds, assignmentType, deadline } = req.body;
 
     if (!Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({
@@ -200,6 +200,7 @@ const assignCourseToUsers = async (req, res) => {
       userIds,
       assignmentType,
       assignedBy: req.user.id,
+      deadline,
     });
 
     res.status(200).json({

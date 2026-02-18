@@ -208,6 +208,7 @@ const assignCourse = async ({
   userIds,
   assignmentType,
   assignedBy,
+  deadline,
 }) => {
   const pool = await getDbPool();
 
@@ -224,16 +225,20 @@ const assignCourse = async ({
 
     if (exists.recordset.length > 0) continue;
 
+    // If no deadline provided, default to 30 days from now
+    const dueDate = deadline || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
     await pool
       .request()
       .input("courseId", courseId)
       .input("userId", userId)
       .input("assignedBy", assignedBy)
-      .input("assignmentType", assignmentType).query(`
+      .input("assignmentType", assignmentType)
+      .input("dueDate", dueDate).query(`
         INSERT INTO CourseAssignments
           (courseId, userId, assignedBy, assignmentType, assignedAt, dueDate)
         VALUES
-          (@courseId, @userId, @assignedBy, @assignmentType, GETDATE(), DATEADD(day, 7, GETDATE()))
+          (@courseId, @userId, @assignedBy, @assignmentType, GETDATE(), @dueDate)
       `);
   }
 };
