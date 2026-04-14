@@ -28,9 +28,14 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
+      "https://localhost:5173",
       "https://lgs-learn-frontend.onrender.com",
-    ],
+      "https://lgs-learn-frontend.azurewebsites.net",
+      process.env.FRONTEND_URL,
+    ].filter(Boolean),
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   }),
 );
 
