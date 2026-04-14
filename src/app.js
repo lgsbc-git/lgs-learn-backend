@@ -27,10 +27,10 @@ app.set("trust proxy", 1);
 app.use(
   cors({
     origin: [
-      "http://localhost:5173",
+      
       "https://localhost:5173",
       "https://lgs-learn-frontend.onrender.com",
-      "https://lgs-learn-frontend.azurewebsites.net",
+      "https://wonderful-forest-08e122e10.7.azurestaticapps.net/",
       process.env.FRONTEND_URL,
     ].filter(Boolean),
     credentials: true,
