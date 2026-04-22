@@ -668,7 +668,7 @@ module.exports = {
           req = new sql.Request(transaction);
           await req
             .input("chapterId", sql.Int, chapterId)
-            .input("content", sql.NVarCharMax, ch.content || "").query(`
+            .input("content", sql.NVarChar(sql.MAX), ch.content || "").query(`
               INSERT INTO ChapterContents (chapterId, content)
               VALUES (@chapterId, @content)
           `);
@@ -684,12 +684,12 @@ module.exports = {
                 
                 await req
                   .input("chapterId", sql.Int, chapterId)
-                  .input("mediaUrl", sql.NVarCharMax, media.url || "")
+                  .input("mediaUrl", sql.NVarChar(sql.MAX), media.url || "")
                   .input("fileName", sql.NVarChar(255), media.fileName || "")
                   .input("mediaType", sql.NVarChar(50), media.mediaType || "image")
                   .input("mimeType", sql.NVarChar(100), media.mimeType || "")
                   .input("fileSize", sql.BigInt, fileSize)
-                  .input("blobName", sql.NVarCharMax, media.blobName || "").query(`
+                  .input("blobName", sql.NVarChar(sql.MAX), media.blobName || "").query(`
                     INSERT INTO ChapterMedia 
                     (chapterId, mediaUrl, fileName, mediaType, mimeType, fileSize, blobName)
                     VALUES (@chapterId, @mediaUrl, @fileName, @mediaType, @mimeType, @fileSize, @blobName)
