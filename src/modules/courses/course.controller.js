@@ -69,18 +69,12 @@ const getMyAssignedCourses = async (req, res) => {
  */
 const getCourseContentForEmployee = async (req, res) => {
   try {
-    const courseId = parseInt(req.params.courseId, 10);
-    if (isNaN(courseId)) {
-      return res.status(400).json({ message: "Invalid course ID" });
-    }
     const content = await fetchCourseContentForEmployee(
-      courseId,
+      req.params.courseId,
       req.user.id,
     );
     res.status(200).json(content);
   } catch (err) {
-    console.error("❌ Error fetching course content:", err.message);
-    console.error("Stack:", err.stack);
     res.status(403).json({ message: err.message });
   }
 };
@@ -91,15 +85,9 @@ const getCourseContentForEmployee = async (req, res) => {
  */
 const getCourseContentForAdmin = async (req, res) => {
   try {
-    const courseId = parseInt(req.params.courseId, 10);
-    if (isNaN(courseId)) {
-      return res.status(400).json({ message: "Invalid course ID" });
-    }
-    const content = await fetchCourseContentForAdmin(courseId);
+    const content = await fetchCourseContentForAdmin(req.params.courseId);
     res.status(200).json(content);
   } catch (err) {
-    console.error("❌ Error fetching admin course content:", err.message);
-    console.error("Stack:", err.stack);
     res.status(500).json({ message: err.message });
   }
 };
@@ -112,18 +100,11 @@ const saveCourseContent = async (req, res) => {
   try {
     const { modules, quiz } = req.body;
     const userId = req.user.id;
-    const courseId = parseInt(req.params.courseId, 10);
-
-    if (isNaN(courseId)) {
-      return res.status(400).json({ message: "Invalid course ID" });
-    }
+    const courseId = req.params.courseId;
 
     if (!Array.isArray(modules)) {
       return res.status(400).json({ message: "modules must be an array" });
     }
-
-    console.log(`📝 Saving course content for courseId: ${courseId}`);
-    console.log(`   Modules: ${modules.length}, Quiz: ${quiz ? "yes" : "no"}`);
 
     // Save modules
     await saveCourseContentForAdmin(courseId, modules);
@@ -189,9 +170,7 @@ const saveCourseContent = async (req, res) => {
 
     res.status(200).json({ message: "Course content saved successfully" });
   } catch (err) {
-    console.error("❌ Error saving course content:", err.message);
-    console.error("Stack:", err.stack);
-    res.status(500).json({ message: err.message, error: err.message });
+    res.status(500).json({ message: err.message });
   }
 };
 
