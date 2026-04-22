@@ -4,6 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:api": "jest --testPathPattern='src.*__tests__'",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
@@ -30,10 +33,7 @@
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "nodemon": "^3.1.11"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "clearMocks": true
+    "nodemon": "^3.1.11",
+    "supertest": "^7.2.2"
   }
 }
