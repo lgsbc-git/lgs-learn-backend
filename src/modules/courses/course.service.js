@@ -114,104 +114,91 @@ const fetchAssignedCoursesForUser = async (userId) => {
  * Employee: fetch course content (read-only)
  */
 const fetchCourseContentForEmployee = async (courseId, userId) => {
-  try {
-    const pool = await getDbPool();
+  const pool = await getDbPool();
 
-    // Validate inputs
-    if (!courseId || !userId) {
-      throw new Error("Invalid courseId or userId");
+  // Ensure course is assigned
+  const assignmentCheck = await pool
+    .request()
+    .input("courseId", courseId)
+    .input("userId", userId).query(`
+      SELECT id
+      FROM CourseAssignments
+      WHERE courseId = @courseId AND userId = @userId
+    `);
+
+  if (assignmentCheck.recordset.length === 0) {
+    throw new Error("Course not assigned to this user");
+  }
+
+  // Fetch structured content with media
+  const result = await pool.request().input("courseId", courseId).query(`
+      SELECT
+        m.id AS moduleId,
+        m.title AS moduleTitle,
+        m.moduleOrder,
+        ch.id AS chapterId,
+        ch.title AS chapterTitle,
+        ch.chapterOrder,
+        cc.content,
+        cm.id AS mediaId,
+        cm.mediaUrl,
+        cm.fileName,
+        cm.mediaType,
+        cm.mimeType,
+        cm.fileSize,
+        cm.blobName
+      FROM CourseModules m
+      JOIN CourseChapters ch ON ch.moduleId = m.id
+      JOIN ChapterContents cc ON cc.chapterId = ch.id
+      LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
+      WHERE m.courseId = @courseId
+      ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
+    `);
+
+  const modulesMap = {};
+
+  for (const row of result.recordset) {
+    if (!modulesMap[row.moduleId]) {
+      modulesMap[row.moduleId] = {
+        id: row.moduleId,
+        title: row.moduleTitle,
+        chapters: [],
+      };
     }
 
-    // Ensure course is assigned
-    const assignmentCheck = await pool
-      .request()
-      .input("courseId", sql.Int, courseId)
-      .input("userId", sql.Int, userId).query(`
-        SELECT id
-        FROM CourseAssignments
-        WHERE courseId = @courseId AND userId = @userId
-      `);
+    const existingChapter = modulesMap[row.moduleId].chapters.find(
+      (ch) => ch.id === row.chapterId,
+    );
 
-    if (assignmentCheck.recordset.length === 0) {
-      throw new Error("Course not assigned to this user");
+    if (!existingChapter) {
+      modulesMap[row.moduleId].chapters.push({
+        id: row.chapterId,
+        title: row.chapterTitle,
+        content: row.content,
+        media: [],
+      });
     }
 
-    console.log(`📖 Fetching course content for courseId: ${courseId}, userId: ${userId}`);
-
-    // Fetch structured content with media
-    const result = await pool.request().input("courseId", sql.Int, courseId).query(`
-        SELECT
-          m.id AS moduleId,
-          m.title AS moduleTitle,
-          m.moduleOrder,
-          ch.id AS chapterId,
-          ch.title AS chapterTitle,
-          ch.chapterOrder,
-          cc.content,
-          cm.id AS mediaId,
-          cm.mediaUrl,
-          cm.fileName,
-          cm.mediaType,
-          cm.mimeType,
-          cm.fileSize,
-          cm.blobName
-        FROM CourseModules m
-        JOIN CourseChapters ch ON ch.moduleId = m.id
-        JOIN ChapterContents cc ON cc.chapterId = ch.id
-        LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
-        WHERE m.courseId = @courseId
-        ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
-      `);
-
-    const modulesMap = {};
-
-    for (const row of result.recordset) {
-      if (!modulesMap[row.moduleId]) {
-        modulesMap[row.moduleId] = {
-          id: row.moduleId,
-          title: row.moduleTitle || "",
-          chapters: [],
-        };
-      }
-
-      const existingChapter = modulesMap[row.moduleId].chapters.find(
+    // Add media if it exists
+    if (row.mediaId) {
+      const chapter = modulesMap[row.moduleId].chapters.find(
         (ch) => ch.id === row.chapterId,
       );
-
-      if (!existingChapter) {
-        modulesMap[row.moduleId].chapters.push({
-          id: row.chapterId,
-          title: row.chapterTitle || "",
-          content: row.content || "",
-          media: [],
+      if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
+        chapter.media.push({
+          id: row.mediaId,
+          url: row.mediaUrl,
+          fileName: row.fileName,
+          mediaType: row.mediaType,
+          mimeType: row.mimeType,
+          size: row.fileSize,
+          blobName: row.blobName,
         });
       }
-
-      // Add media if it exists
-      if (row.mediaId) {
-        const chapter = modulesMap[row.moduleId].chapters.find(
-          (ch) => ch.id === row.chapterId,
-        );
-        if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
-          chapter.media.push({
-            id: row.mediaId,
-            url: row.mediaUrl || "",
-            fileName: row.fileName || "",
-            mediaType: row.mediaType || "",
-            mimeType: row.mimeType || "",
-            size: row.fileSize || 0,
-            blobName: row.blobName || "",
-          });
-        }
-      }
     }
-
-    console.log(`✅ Fetched ${Object.keys(modulesMap).length} modules for courseId: ${courseId}`);
-    return Object.values(modulesMap);
-  } catch (err) {
-    console.error(`❌ Error in fetchCourseContentForEmployee:`, err.message);
-    throw err;
   }
+
+  return Object.values(modulesMap);
 };
 /**
  * Assign course to multiple users
@@ -485,106 +472,90 @@ module.exports = {
   deleteCourseFully,
   // Admin: fetch structured content without assignment check
   fetchCourseContentForAdmin: async (courseId) => {
-    try {
-      const pool = await getDbPool();
+    const pool = await getDbPool();
 
-      // Validate input
-      if (!courseId) {
-        throw new Error("Invalid courseId");
+    const result = await pool.request().input("courseId", courseId).query(`
+        SELECT
+          m.id AS moduleId,
+          m.title AS moduleTitle,
+          m.moduleOrder,
+          ch.id AS chapterId,
+          ch.title AS chapterTitle,
+          ch.chapterOrder,
+          cc.content,
+          cm.id AS mediaId,
+          cm.mediaUrl,
+          cm.fileName,
+          cm.mediaType,
+          cm.mimeType,
+          cm.fileSize,
+          cm.blobName
+        FROM CourseModules m
+        JOIN CourseChapters ch ON ch.moduleId = m.id
+        JOIN ChapterContents cc ON cc.chapterId = ch.id
+        LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
+        WHERE m.courseId = @courseId
+        ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
+      `);
+
+    const modulesMap = {};
+
+    for (const row of result.recordset) {
+      if (!modulesMap[row.moduleId]) {
+        modulesMap[row.moduleId] = {
+          id: row.moduleId,
+          title: row.moduleTitle,
+          chapters: [],
+        };
       }
 
-      console.log(`📋 Fetching admin course content for courseId: ${courseId}`);
+      const existingChapter = modulesMap[row.moduleId].chapters.find(
+        (ch) => ch.id === row.chapterId,
+      );
 
-      const result = await pool.request().input("courseId", sql.Int, courseId).query(`
-          SELECT
-            m.id AS moduleId,
-            m.title AS moduleTitle,
-            m.moduleOrder,
-            ch.id AS chapterId,
-            ch.title AS chapterTitle,
-            ch.chapterOrder,
-            cc.content,
-            cm.id AS mediaId,
-            cm.mediaUrl,
-            cm.fileName,
-            cm.mediaType,
-            cm.mimeType,
-            cm.fileSize,
-            cm.blobName
-          FROM CourseModules m
-          JOIN CourseChapters ch ON ch.moduleId = m.id
-          JOIN ChapterContents cc ON cc.chapterId = ch.id
-          LEFT JOIN ChapterMedia cm ON cm.chapterId = ch.id
-          WHERE m.courseId = @courseId
-          ORDER BY m.moduleOrder, ch.chapterOrder, cm.id
-        `);
+      if (!existingChapter) {
+        modulesMap[row.moduleId].chapters.push({
+          id: row.chapterId,
+          title: row.chapterTitle,
+          content: row.content,
+          media: [],
+        });
+      }
 
-      const modulesMap = {};
-
-      for (const row of result.recordset) {
-        if (!modulesMap[row.moduleId]) {
-          modulesMap[row.moduleId] = {
-            id: row.moduleId,
-            title: row.moduleTitle || "",
-            chapters: [],
-          };
-        }
-
-        const existingChapter = modulesMap[row.moduleId].chapters.find(
+      // Add media if it exists
+      if (row.mediaId) {
+        const chapter = modulesMap[row.moduleId].chapters.find(
           (ch) => ch.id === row.chapterId,
         );
-
-        if (!existingChapter) {
-          modulesMap[row.moduleId].chapters.push({
-            id: row.chapterId,
-            title: row.chapterTitle || "",
-            content: row.content || "",
-            media: [],
+        if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
+          chapter.media.push({
+            id: row.mediaId,
+            url: row.mediaUrl,
+            fileName: row.fileName,
+            mediaType: row.mediaType,
+            mimeType: row.mimeType,
+            size: row.fileSize,
+            blobName: row.blobName,
           });
         }
-
-        // Add media if it exists
-        if (row.mediaId) {
-          const chapter = modulesMap[row.moduleId].chapters.find(
-            (ch) => ch.id === row.chapterId,
-          );
-          if (chapter && !chapter.media.find((m) => m.id === row.mediaId)) {
-            chapter.media.push({
-              id: row.mediaId,
-              url: row.mediaUrl || "",
-              fileName: row.fileName || "",
-              mediaType: row.mediaType || "",
-              mimeType: row.mimeType || "",
-              size: row.fileSize || 0,
-              blobName: row.blobName || "",
-            });
-          }
-        }
       }
-
-      console.log(`✅ Fetched ${Object.keys(modulesMap).length} modules for admin courseId: ${courseId}`);
-      return Object.values(modulesMap);
-    } catch (err) {
-      console.error(`❌ Error in fetchCourseContentForAdmin:`, err.message);
-      throw err;
     }
+
+    return Object.values(modulesMap);
   },
   // Admin: persist full structured content (modules -> chapters -> contents)
   saveCourseContentForAdmin: async (courseId, modules) => {
     const pool = await getDbPool();
     const transaction = new sql.Transaction(pool);
-    
+    await transaction.begin();
     try {
-      console.log(`📦 Starting transaction for courseId: ${courseId}`);
-      await transaction.begin();
-      
       // Delete existing contents for the course (must respect foreign keys)
       // We delete orphaned LessonProgress records only for chapters being removed
       // Order: ChapterContents -> ChapterMedia -> LessonProgress -> CourseChapters -> CourseModules
 
       // 1. Delete ChapterContents (no foreign key dependency)
       let req = new sql.Request(transaction);
-      await req.input("courseId", sql.Int, courseId).query(`
+      await req.input("courseId", courseId).query(`
         DELETE cc
         FROM ChapterContents cc
         JOIN CourseChapters ch ON cc.chapterId = ch.id
@@ -594,7 +565,7 @@ module.exports = {
 
       // 2. Delete ChapterMedia
       req = new sql.Request(transaction);
-      await req.input("courseId", sql.Int, courseId).query(`
+      await req.input("courseId", courseId).query(`
         DELETE cm
         FROM ChapterMedia cm
         JOIN CourseChapters ch ON cm.chapterId = ch.id
@@ -604,7 +575,7 @@ module.exports = {
 
       // 3. Delete LessonProgress for chapters in this course (required by FK constraint)
       req = new sql.Request(transaction);
-      await req.input("courseId", sql.Int, courseId).query(`
+      await req.input("courseId", courseId).query(`
         DELETE lp
         FROM LessonProgress lp
         JOIN CourseChapters ch ON lp.chapterId = ch.id
@@ -614,7 +585,7 @@ module.exports = {
 
       // 4. Delete CourseChapters (now safe without FK conflict)
       req = new sql.Request(transaction);
-      await req.input("courseId", sql.Int, courseId).query(`
+      await req.input("courseId", courseId).query(`
         DELETE ch
         FROM CourseChapters ch
         JOIN CourseModules m ON ch.moduleId = m.id
@@ -623,11 +594,9 @@ module.exports = {
 
       // 5. Delete CourseModules
       req = new sql.Request(transaction);
-      await req.input("courseId", sql.Int, courseId).query(`
+      await req.input("courseId", courseId).query(`
         DELETE FROM CourseModules WHERE courseId = @courseId
       `);
-
-      console.log(`✅ Deleted existing content for courseId: ${courseId}`);
 
       // Insert new modules, chapters, and contents
       for (let m = 0; m < modules.length; m++) {
@@ -636,16 +605,15 @@ module.exports = {
 
         req = new sql.Request(transaction);
         const modRes = await req
-          .input("courseId", sql.Int, courseId)
-          .input("title", sql.NVarChar, title)
-          .input("order", sql.Int, m + 1).query(`
+          .input("courseId", courseId)
+          .input("title", title)
+          .input("order", m + 1).query(`
             INSERT INTO CourseModules (courseId, title, moduleOrder)
             OUTPUT INSERTED.id
             VALUES (@courseId, @title, @order)
         `);
 
         const moduleId = modRes.recordset[0].id;
-        console.log(`  📚 Created module: ${title} (ID: ${moduleId})`);
 
         const chapters = Array.isArray(mod.chapters) ? mod.chapters : [];
         for (let c = 0; c < chapters.length; c++) {
@@ -654,21 +622,20 @@ module.exports = {
 
           req = new sql.Request(transaction);
           const chRes = await req
-            .input("moduleId", sql.Int, moduleId)
-            .input("title", sql.NVarChar, chTitle)
-            .input("order", sql.Int, c + 1).query(`
+            .input("moduleId", moduleId)
+            .input("title", chTitle)
+            .input("order", c + 1).query(`
               INSERT INTO CourseChapters (moduleId, title, chapterOrder)
               OUTPUT INSERTED.id
               VALUES (@moduleId, @title, @order)
           `);
 
           const chapterId = chRes.recordset[0].id;
-          console.log(`    📖 Created chapter: ${chTitle} (ID: ${chapterId})`);
 
           req = new sql.Request(transaction);
           await req
-            .input("chapterId", sql.Int, chapterId)
-            .input("content", sql.NVarCharMax, ch.content || "").query(`
+            .input("chapterId", chapterId)
+            .input("content", ch.content || "").query(`
               INSERT INTO ChapterContents (chapterId, content)
               VALUES (@chapterId, @content)
           `);
@@ -676,39 +643,27 @@ module.exports = {
           // Insert media for this chapter
           if (Array.isArray(ch.media) && ch.media.length > 0) {
             for (const media of ch.media) {
-              try {
-                req = new sql.Request(transaction);
-                const fileSize = parseInt(media.size, 10) || 0;
-                
-                console.log(`      🖼️  Inserting media: ${media.fileName} (size: ${fileSize} bytes)`);
-                
-                await req
-                  .input("chapterId", sql.Int, chapterId)
-                  .input("mediaUrl", sql.NVarCharMax, media.url || "")
-                  .input("fileName", sql.NVarChar(255), media.fileName || "")
-                  .input("mediaType", sql.NVarChar(50), media.mediaType || "image")
-                  .input("mimeType", sql.NVarChar(100), media.mimeType || "")
-                  .input("fileSize", sql.BigInt, fileSize)
-                  .input("blobName", sql.NVarCharMax, media.blobName || "").query(`
-                    INSERT INTO ChapterMedia 
-                    (chapterId, mediaUrl, fileName, mediaType, mimeType, fileSize, blobName)
-                    VALUES (@chapterId, @mediaUrl, @fileName, @mediaType, @mimeType, @fileSize, @blobName)
-                `);
-              } catch (mediaErr) {
-                console.error(`❌ Failed to insert media: ${media.fileName}`, mediaErr.message);
-                throw new Error(`Failed to insert media ${media.fileName}: ${mediaErr.message}`);
-              }
+              req = new sql.Request(transaction);
+              await req
+                .input("chapterId", chapterId)
+                .input("mediaUrl", media.url || "")
+                .input("fileName", media.fileName || "")
+                .input("mediaType", media.mediaType || "image")
+                .input("mimeType", media.mimeType || "")
+                .input("fileSize", media.size || 0)
+                .input("blobName", media.blobName || "").query(`
+                  INSERT INTO ChapterMedia 
+                  (chapterId, mediaUrl, fileName, mediaType, mimeType, fileSize, blobName)
+                  VALUES (@chapterId, @mediaUrl, @fileName, @mediaType, @mimeType, @fileSize, @blobName)
+              `);
             }
           }
         }
       }
 
       await transaction.commit();
-      console.log(`✅ Course content saved successfully for courseId: ${courseId}`);
       return true;
     } catch (err) {
-      console.error(`❌ Transaction failed for courseId ${courseId}:`, err.message);
-      console.error(`Stack:`, err.stack);
       await transaction.rollback();
       throw err;
     }
